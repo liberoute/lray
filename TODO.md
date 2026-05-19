@@ -36,14 +36,12 @@
 - [x] Multi-listener proxies (type: mixed/http/socks5/mtproto, mode: smart/relay/direct/mitm)
 - [x] Smart router cache persistence (routing_cache.json, 24h expiry, max 5000)
 - [x] MTProto proxy base (obfuscated2 + fake-TLS, batching, gzip, DC detection)
+- [x] MTProto relay integration (GAS cmd=mtproto, exit node DC forwarder, persistent connections)
 
 ## TODO ❌
 
 ### High Priority
-- [ ] MTProto relay integration — GAS/Worker side must handle batched MTProto packets
-  - GAS Code.gs needs `cmd: "mtproto"` handler to forward batches to Telegram DCs
-  - Exit node needs MTProto batch unpacker + DC forwarder
-  - End-to-end test with real Telegram client
+- [ ] MTProto end-to-end test with real Telegram client
 - [ ] Relay compression (gzip) — compress traffic between lray and GAS
   - Per-listener option: `"compress": true`
   - Request body gzip before sending to GAS
