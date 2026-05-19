@@ -66,7 +66,7 @@ Common issues:
 lray stop  # or Ctrl+C
 
 # Delete generated files
-rm -rf dist/ config.json ca/
+rm -rf output/ config.json ca/
 
 # Start fresh
 lray setup

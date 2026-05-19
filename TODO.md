@@ -35,19 +35,15 @@
 - [x] Patterniha sync (auto-fetch MITM-DomainFronting config for direct access)
 - [x] Multi-listener proxies (type: mixed/http/socks5/mtproto, mode: smart/relay/direct/mitm)
 - [x] Smart router cache persistence (routing_cache.json, 24h expiry, max 5000)
+- [x] MTProto proxy base (obfuscated2 + fake-TLS, batching, gzip, DC detection)
 
 ## TODO ❌
 
 ### High Priority
-- [ ] MTProto proxy for Telegram — reduce quota usage
-  - Telegram sends many small requests (polling, updates, media)
-  - MTProto protocol: obfuscated TCP, secret-based auth
-  - Strategy: batch multiple Telegram requests into single relay call
-  - Persistent connection to relay (keep-alive, multiplex)
-  - Separate quota bucket for Telegram traffic
-  - Config: `{ "port": 8443, "type": "mtproto", "mode": "relay", "secret": "ee..." }`
-  - Client connects with MTProto secret → lray decodes → batches → relays
-  - Reduces 100 small requests to ~10 batched relay calls
+- [ ] MTProto relay integration — GAS/Worker side must handle batched MTProto packets
+  - GAS Code.gs needs `cmd: "mtproto"` handler to forward batches to Telegram DCs
+  - Exit node needs MTProto batch unpacker + DC forwarder
+  - End-to-end test with real Telegram client
 - [ ] Relay compression (gzip) — compress traffic between lray and GAS
   - Per-listener option: `"compress": true`
   - Request body gzip before sending to GAS

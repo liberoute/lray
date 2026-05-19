@@ -28,14 +28,14 @@ The wizard asks:
 4. **Proxy ports** — HTTP and SOCKS5
 5. **TCP tunnels** — SSH, databases (optional)
 
-After setup, `dist/` folder contains everything ready to deploy.
+After setup, `output/` folder contains everything ready to deploy.
 
 ## Deploy
 
 ### If you only have Google (mode: gas)
 
 1. Go to [script.google.com](https://script.google.com)
-2. New project → paste `dist/gas/Code.gs` → Deploy as Web app
+2. New project → paste `output/gas/Code.gs` → Deploy as Web app
 3. Copy Deployment ID → put in `config.json`
 4. `lray start`
 
@@ -43,13 +43,13 @@ After setup, `dist/` folder contains everything ready to deploy.
 
 1. Deploy Code.gs (same as above)
 2. Go to [Cloudflare Dashboard](https://dash.cloudflare.com) → Workers → Create
-3. Paste `dist/cloudflare-worker/worker.js` → Deploy
+3. Paste `output/cloudflare-worker/worker.js` → Deploy
 4. `lray start`
 
 ### If you have Google + VPS (mode: vps)
 
 1. Deploy Code.gs (same as above)
-2. Upload `dist/upstream_forwarder/` to VPS → `./start.sh`
+2. Upload `output/self-hosted-exit/` to VPS → `./start.sh`
 3. `lray start`
 
 ## Use

@@ -4,30 +4,27 @@
 
 | Component | Purpose | When needed |
 |---|---|---|
-| **upstream_forwarder** | HTTP relay exit (Docker + Traefik) | mode: `vps` or `cfw_vps` |
-| **self-hosted-exit** | Simpler HTTP relay (single container) | mode: `vps` (alternative) |
-| **ws-tunnel-server** | TCP tunnel (SSH, DB) when VPS is directly reachable | Optional |
+| **upstream_forwarder** | HTTP relay exit (Docker) | mode: `cfw_vps` |
+| **self-hosted-exit** | Direct exit node (Docker) | mode: `vps` |
 
-For most users: **upstream_forwarder** is all you need.
-
-## Deploy upstream_forwarder
+## Deploy
 
 ```bash
 # On your PC — generate files
-lray setup    # or: lray update
+lray setup    # or: lray setup --rebuild
 
 # Upload to server
-scp -r dist/upstream_forwarder/ root@your-server:/opt/forwarder/
+scp -r output/self-hosted-exit/ root@your-server:/opt/exit/
 
 # On server
-cd /opt/forwarder
+cd /opt/exit
 chmod +x start.sh
 ./start.sh
 ```
 
 That's it. `start.sh` handles:
 - Extracting `update.zip`
-- Starting Docker (Traefik + forwarder containers)
+- Building and starting Docker container
 - SSL (Let's Encrypt or own certs)
 - Health checks
 
@@ -35,13 +32,13 @@ That's it. `start.sh` handles:
 
 ```bash
 # On PC
-lray update
+lray setup --rebuild
 
 # Upload only the zip
-scp dist/upstream_forwarder/update.zip root@server:/opt/forwarder/
+scp output/self-hosted-exit/update.zip root@server:/opt/exit/
 
 # On server
-./start.sh restart
+./start.sh
 ```
 
 `start.sh` detects `update.zip`, extracts, overwrites all files, restarts.
@@ -83,4 +80,4 @@ MEM_LIMIT=1g            # 1GB per instance
 CPU_LIMIT=2.0           # 2 cores per instance
 ```
 
-Traefik auto-balances between replicas.
+Docker Compose auto-balances between replicas.
