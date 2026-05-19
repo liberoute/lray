@@ -79,6 +79,20 @@ export default {
 
             const req = await request.json();
 
+            // ── MTProto relay (forward to upstream forwarder) ────────────────
+            if (req.cmd === "mtproto") {
+                const upstreamUrls = getUpstreamUrls(env);
+                if (upstreamUrls.length === 0) {
+                    return addCors(json({
+                        e: "mtproto requires UPSTREAM_FORWARDER_URL (Worker can't do raw TCP)"
+                    }, 501));
+                }
+                // Forward entire MTProto batch to forwarder
+                const mtpResp = await forwardWithFailover(req, env, upstreamUrls);
+                if (mtpResp) return addCors(mtpResp);
+                return addCors(json({ e: "all forwarders failed for mtproto" }, 502));
+            }
+
             if (!req.u) {
                 return json({ e: "missing url" }, 400);
             }
