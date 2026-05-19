@@ -309,6 +309,12 @@ async function handleRequest(req, res) {
         return;
     }
 
+    // ── MTProto Relay (Telegram DC forwarding) ───────────────────────────────
+    if (body.cmd === "mtproto") {
+        await handleMTProtoRelay(body, res);
+        return;
+    }
+
     // Validate URL
     if (!body.u || typeof body.u !== "string" || !/^https?:\/\//i.test(body.u)) {
         sendJson(res, 400, { e: "bad url" });
@@ -514,6 +520,210 @@ setInterval(() => {
         }
     }
 }, 60000).unref();
+
+// ─── MTProto Relay ───────────────────────────────────────────────────────────
+// Receives batched Telegram packets, forwards to the appropriate DC via TCP,
+// and returns the response.
+//
+// Request: { cmd: "mtproto", dc: 2, data: "base64...", compressed: true }
+// data = [count:u16][len1:u32][pkt1][len2:u32][pkt2]... (optionally gzipped)
+
+const TELEGRAM_DCS = {
+    1: { host: "149.154.175.50", port: 443 },
+    2: { host: "149.154.167.50", port: 443 },
+    3: { host: "149.154.175.100", port: 443 },
+    4: { host: "149.154.167.91", port: 443 },
+    5: { host: "91.108.56.100", port: 443 },
+};
+
+// Persistent TCP connections to Telegram DCs
+const dcConnections = new Map(); // dc_id → { socket, buffer, lastUsed }
+
+async function handleMTProtoRelay(body, res) {
+    const dc = body.dc || 2;
+    const dataB64 = body.data || "";
+    const compressed = body.compressed || false;
+
+    if (!dataB64) {
+        sendJson(res, 400, { e: "no data" });
+        return;
+    }
+
+    const dcInfo = TELEGRAM_DCS[Math.abs(dc)] || TELEGRAM_DCS[2];
+
+    try {
+        // Decode base64 data
+        let data = Buffer.from(dataB64, "base64");
+
+        // Decompress if needed
+        if (compressed) {
+            const zlib = require("zlib");
+            data = zlib.gunzipSync(data);
+        }
+
+        // Parse batch: [count:u16][len1:u32][pkt1][len2:u32][pkt2]...
+        const count = data.readUInt16LE(0);
+        let offset = 2;
+        const packets = [];
+
+        for (let i = 0; i < count && offset < data.length; i++) {
+            const pktLen = data.readUInt32LE(offset);
+            offset += 4;
+            if (offset + pktLen > data.length) break;
+            packets.push(data.slice(offset, offset + pktLen));
+            offset += pktLen;
+        }
+
+        if (packets.length === 0) {
+            sendJson(res, 400, { e: "no packets in batch" });
+            return;
+        }
+
+        // Get or create persistent connection to DC
+        const conn = await getDcConnection(dc, dcInfo);
+
+        // Send all packets and collect responses
+        const responses = [];
+        for (const pkt of packets) {
+            const resp = await sendToDc(conn, pkt);
+            if (resp) responses.push(resp);
+        }
+
+        // Encode response batch
+        let respData = Buffer.alloc(2);
+        respData.writeUInt16LE(responses.length, 0);
+
+        for (const resp of responses) {
+            const lenBuf = Buffer.alloc(4);
+            lenBuf.writeUInt32LE(resp.length, 0);
+            respData = Buffer.concat([respData, lenBuf, resp]);
+        }
+
+        // Compress response if requested
+        if (compressed) {
+            const zlib = require("zlib");
+            respData = zlib.gzipSync(respData);
+        }
+
+        // Return as base64
+        sendJson(res, 200, {
+            data: respData.toString("base64"),
+            compressed: compressed,
+            packets: responses.length,
+        });
+
+        log("INFO", "MTProto relay", {
+            dc, packets_in: packets.length, packets_out: responses.length,
+        });
+
+    } catch (err) {
+        log("ERROR", "MTProto relay error", { dc, error: String(err.message || err) });
+        sendJson(res, 500, { e: "mtproto relay error: " + String(err.message || err) });
+    }
+}
+
+async function getDcConnection(dcId, dcInfo) {
+    const net = require("net");
+    const key = `dc${dcId}`;
+
+    // Reuse existing connection if alive
+    const existing = dcConnections.get(key);
+    if (existing && existing.socket && !existing.socket.destroyed) {
+        existing.lastUsed = Date.now();
+        return existing;
+    }
+
+    // Create new connection
+    return new Promise((resolve, reject) => {
+        const socket = net.createConnection(dcInfo.port, dcInfo.host, () => {
+            const conn = { socket, buffer: Buffer.alloc(0), lastUsed: Date.now(), pending: [] };
+            dcConnections.set(key, conn);
+
+            socket.on("data", (chunk) => {
+                conn.buffer = Buffer.concat([conn.buffer, chunk]);
+                // Try to resolve pending reads
+                while (conn.pending.length > 0 && conn.buffer.length > 0) {
+                    const { resolve: res, timeout } = conn.pending[0];
+                    // MTProto packets are length-prefixed (4 bytes LE)
+                    if (conn.buffer.length >= 4) {
+                        const pktLen = conn.buffer.readUInt32LE(0);
+                        if (pktLen > 0 && conn.buffer.length >= 4 + pktLen) {
+                            const pkt = conn.buffer.slice(4, 4 + pktLen);
+                            conn.buffer = conn.buffer.slice(4 + pktLen);
+                            conn.pending.shift();
+                            clearTimeout(timeout);
+                            res(pkt);
+                        } else {
+                            break; // Wait for more data
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            });
+
+            socket.on("error", () => {
+                dcConnections.delete(key);
+                // Reject all pending
+                for (const p of conn.pending) {
+                    clearTimeout(p.timeout);
+                    p.resolve(null);
+                }
+                conn.pending = [];
+            });
+
+            socket.on("close", () => {
+                dcConnections.delete(key);
+            });
+
+            resolve(conn);
+        });
+
+        socket.setTimeout(10000);
+        socket.on("timeout", () => {
+            socket.destroy();
+            reject(new Error("DC connection timeout"));
+        });
+        socket.on("error", (err) => {
+            reject(err);
+        });
+    });
+}
+
+function sendToDc(conn, packet) {
+    return new Promise((resolve) => {
+        if (!conn.socket || conn.socket.destroyed) {
+            resolve(null);
+            return;
+        }
+
+        // Send length-prefixed packet
+        const lenBuf = Buffer.alloc(4);
+        lenBuf.writeUInt32LE(packet.length, 0);
+        conn.socket.write(Buffer.concat([lenBuf, packet]));
+
+        // Wait for response with timeout
+        const timeout = setTimeout(() => {
+            // Remove from pending
+            const idx = conn.pending.findIndex(p => p.resolve === resolve);
+            if (idx >= 0) conn.pending.splice(idx, 1);
+            resolve(null);
+        }, 5000);
+
+        conn.pending.push({ resolve, timeout });
+    });
+}
+
+// Clean up stale DC connections every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, conn] of dcConnections) {
+        if (now - conn.lastUsed > 300000) { // 5 min idle
+            try { conn.socket.destroy(); } catch (_) {}
+            dcConnections.delete(key);
+        }
+    }
+}, 300000).unref();
 
 async function handleTcpTunnel(body, res) {
     const { sid, cmd, host, port, b } = body;

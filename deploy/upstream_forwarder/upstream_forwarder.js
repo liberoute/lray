@@ -387,6 +387,15 @@ async function handleRequest(req, res) {
         return;
     }
 
+    // ── MTProto Relay ────────────────────────────────────────────────────────
+    if (body.cmd === "mtproto") {
+        // Forward to exit node (upstream_forwarder is a middle hop)
+        // In cfw_vps mode: Worker → Forwarder → DC
+        // Reuse the same handler as self-hosted-exit
+        await handleMTProtoRelay(body, res);
+        return;
+    }
+
     // Validate URL
     if (!body.u || typeof body.u !== "string" || !/^https?:\/\//i.test(body.u)) {
         sendJson(res, 400, { e: "bad url" });
@@ -548,7 +557,6 @@ if (httpServer) {
     httpServer.headersTimeout = 125000;
     httpServer.listen(HTTP_PORT || 80, HOST);
 }
-});
 
 // ─── TCP Tunnel ──────────────────────────────────────────────────────────────
 
@@ -566,6 +574,123 @@ setInterval(() => {
         }
     }
 }, 60000).unref();
+
+// ─── MTProto Relay ───────────────────────────────────────────────────────────
+
+const TELEGRAM_DCS_FWD = {
+    1: { host: "149.154.175.50", port: 443 },
+    2: { host: "149.154.167.50", port: 443 },
+    3: { host: "149.154.175.100", port: 443 },
+    4: { host: "149.154.167.91", port: 443 },
+    5: { host: "91.108.56.100", port: 443 },
+};
+
+const dcConnectionsFwd = new Map();
+
+async function handleMTProtoRelay(body, res) {
+    const dc = body.dc || 2;
+    const dataB64 = body.data || "";
+    const compressed = body.compressed || false;
+
+    if (!dataB64) { sendJson(res, 400, { e: "no data" }); return; }
+
+    const dcInfo = TELEGRAM_DCS_FWD[Math.abs(dc)] || TELEGRAM_DCS_FWD[2];
+
+    try {
+        let data = Buffer.from(dataB64, "base64");
+        if (compressed) {
+            const zlib = require("zlib");
+            data = zlib.gunzipSync(data);
+        }
+
+        const count = data.readUInt16LE(0);
+        let offset = 2;
+        const packets = [];
+        for (let i = 0; i < count && offset < data.length; i++) {
+            const pktLen = data.readUInt32LE(offset);
+            offset += 4;
+            if (offset + pktLen > data.length) break;
+            packets.push(data.slice(offset, offset + pktLen));
+            offset += pktLen;
+        }
+
+        if (packets.length === 0) { sendJson(res, 400, { e: "no packets" }); return; }
+
+        const conn = await getDcConnectionFwd(dc, dcInfo);
+        const responses = [];
+        for (const pkt of packets) {
+            const resp = await sendToDcFwd(conn, pkt);
+            if (resp) responses.push(resp);
+        }
+
+        let respData = Buffer.alloc(2);
+        respData.writeUInt16LE(responses.length, 0);
+        for (const resp of responses) {
+            const lenBuf = Buffer.alloc(4);
+            lenBuf.writeUInt32LE(resp.length, 0);
+            respData = Buffer.concat([respData, lenBuf, resp]);
+        }
+
+        if (compressed) {
+            const zlib = require("zlib");
+            respData = zlib.gzipSync(respData);
+        }
+
+        sendJson(res, 200, { data: respData.toString("base64"), compressed, packets: responses.length });
+        log("INFO", "MTProto relay", { dc, in: packets.length, out: responses.length });
+    } catch (err) {
+        log("ERROR", "MTProto error", { error: String(err.message || err) });
+        sendJson(res, 500, { e: "mtproto error" });
+    }
+}
+
+async function getDcConnectionFwd(dcId, dcInfo) {
+    const net = require("net");
+    const key = `dc${dcId}`;
+    const existing = dcConnectionsFwd.get(key);
+    if (existing && existing.socket && !existing.socket.destroyed) {
+        existing.lastUsed = Date.now();
+        return existing;
+    }
+    return new Promise((resolve, reject) => {
+        const socket = net.createConnection(dcInfo.port, dcInfo.host, () => {
+            const conn = { socket, buffer: Buffer.alloc(0), lastUsed: Date.now(), pending: [] };
+            dcConnectionsFwd.set(key, conn);
+            socket.on("data", (chunk) => {
+                conn.buffer = Buffer.concat([conn.buffer, chunk]);
+                while (conn.pending.length > 0 && conn.buffer.length >= 4) {
+                    const pktLen = conn.buffer.readUInt32LE(0);
+                    if (pktLen > 0 && conn.buffer.length >= 4 + pktLen) {
+                        const pkt = conn.buffer.slice(4, 4 + pktLen);
+                        conn.buffer = conn.buffer.slice(4 + pktLen);
+                        const { resolve: res, timeout } = conn.pending.shift();
+                        clearTimeout(timeout);
+                        res(pkt);
+                    } else break;
+                }
+            });
+            socket.on("error", () => { dcConnectionsFwd.delete(key); conn.pending.forEach(p => { clearTimeout(p.timeout); p.resolve(null); }); });
+            socket.on("close", () => { dcConnectionsFwd.delete(key); });
+            resolve(conn);
+        });
+        socket.setTimeout(10000);
+        socket.on("timeout", () => { socket.destroy(); reject(new Error("timeout")); });
+        socket.on("error", reject);
+    });
+}
+
+function sendToDcFwd(conn, packet) {
+    return new Promise((resolve) => {
+        if (!conn.socket || conn.socket.destroyed) { resolve(null); return; }
+        const lenBuf = Buffer.alloc(4);
+        lenBuf.writeUInt32LE(packet.length, 0);
+        conn.socket.write(Buffer.concat([lenBuf, packet]));
+        const timeout = setTimeout(() => { const idx = conn.pending.findIndex(p => p.resolve === resolve); if (idx >= 0) conn.pending.splice(idx, 1); resolve(null); }, 5000);
+        conn.pending.push({ resolve, timeout });
+    });
+}
+
+setInterval(() => { const now = Date.now(); for (const [k, c] of dcConnectionsFwd) { if (now - c.lastUsed > 300000) { try { c.socket.destroy(); } catch(_){} dcConnectionsFwd.delete(k); } } }, 300000).unref();
 
 async function handleTcpTunnel(body, res) {
     const { sid, cmd, host, port, b } = body;

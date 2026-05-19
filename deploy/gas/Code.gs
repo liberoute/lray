@@ -68,6 +68,11 @@ function doPost(e) {
       });
     }
 
+    // MTProto batch relay (Telegram traffic)
+    if (req.cmd === "mtproto") {
+      return _doMTProto(req);
+    }
+
     if (Array.isArray(req.q)) return _doBatch(req.q);
     return _doSingle(req);
 
@@ -165,6 +170,64 @@ function _doCfwVps(req) {
   var payload = _buildWorkerPayload(req);
   payload.f = 1; // force upstream forwarder
   return _json(_fetchWithFailover(WORKER_URLS, payload));
+}
+
+// ─── MTProto Relay (Telegram DC forwarding) ──────────────────────────────────
+//
+// Client sends batched Telegram packets (optionally gzip-compressed).
+// We forward them to the appropriate Telegram DC and return the response.
+//
+// Request format:
+//   { cmd: "mtproto", dc: 2, data: "base64...", compressed: true }
+//
+// The data field contains:
+//   [count:u16][len1:u32][pkt1][len2:u32][pkt2]...
+//   (optionally gzip-compressed)
+//
+// We unpack, send each packet to the DC via TCP (using UrlFetchApp as HTTP
+// since GAS can't do raw TCP), and return responses.
+//
+// For VPS/CFW modes: forward the entire batch to exit node which handles TCP.
+
+var TELEGRAM_DC_IPS = {
+  1: "149.154.175.50",
+  2: "149.154.167.50",
+  3: "149.154.175.100",
+  4: "149.154.167.91",
+  5: "91.108.56.100",
+};
+
+function _doMTProto(req) {
+  var dc = req.dc || 2;
+  var data = req.data || "";
+  var compressed = req.compressed || false;
+
+  if (!data) return _json({ e: "no data" });
+
+  // For VPS/CFW modes: forward entire batch to exit node
+  if (MODE === "vps" || MODE === "cfw_vps") {
+    var urls = (MODE === "vps") ? VPS_URLS : WORKER_URLS;
+    var payload = {
+      cmd: "mtproto",
+      dc: dc,
+      data: data,
+      compressed: compressed,
+      k: AUTH_KEY,
+    };
+    return _json(_fetchWithFailover(urls, payload));
+  }
+
+  // For GAS direct mode: we can't do raw TCP from GAS
+  // But we can forward to Telegram's HTTPS API endpoints
+  // This is limited — only works for API calls, not raw MTProto
+  //
+  // For full MTProto support, use VPS or CFW mode.
+  // In GAS-only mode, Telegram should use HTTP proxy (CONNECT) instead.
+
+  return _json({
+    e: "mtproto_gas_unsupported",
+    msg: "MTProto relay requires VPS or CFW mode. Use HTTP/SOCKS5 proxy for Telegram in GAS-only mode.",
+  });
 }
 
 // ─── Batch ───────────────────────────────────────────────────────────────────

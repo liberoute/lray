@@ -1271,17 +1271,37 @@ class ProxyServer:
         """Relay MTProto batch data through the GAS relay.
 
         Called by MTProtoProxy for each batch of Telegram packets.
-        Uses the existing domain fronter infrastructure.
+        Sends as cmd=mtproto to GAS which forwards to exit node.
         """
+        import base64
+        import json as _json
+
         try:
-            # Use the fronter to relay as a special "mtproto" request
-            response = await self.fronter.relay_raw(
-                method="POST",
-                url="mtproto://relay",
-                headers={"X-MTProto": "1", "Content-Type": "application/octet-stream"},
-                body=data,
-            )
-            return response
+            # Check if data is gzip-compressed
+            is_compressed = data[:2] == b'\x1f\x8b'
+
+            # Build the relay payload (same format as normal relay but with cmd)
+            payload = _json.dumps({
+                "k": self.fronter._auth_key,
+                "cmd": "mtproto",
+                "dc": 2,
+                "data": base64.b64encode(data).decode(),
+                "compressed": is_compressed,
+            }).encode()
+
+            # Send through fronter's raw HTTP/2 connection to GAS
+            response_bytes = await self.fronter._send_to_gas(payload)
+
+            if response_bytes:
+                try:
+                    resp = _json.loads(response_bytes)
+                    resp_data = resp.get("data", "")
+                    if resp_data:
+                        return base64.b64decode(resp_data)
+                except (ValueError, KeyError):
+                    pass
+
+            return None
         except Exception as e:
             log.debug("MTProto relay failed: %s", e)
             return None
