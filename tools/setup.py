@@ -582,19 +582,9 @@ DASHBOARD_PASS=
 
         "proxies": {
             "lan_sharing": lan_sharing,
-            "http": {
-                "enabled": True,
-                "port": http_port,
-            },
-            "socks5": {
-                "enabled": socks5_enabled,
-                "port": socks5_port,
-            },
-            "mtproto": {
-                "enabled": False,
-                "port": 8443,
-                "secret": "",
-            },
+            "listeners": [
+                {"port": http_port, "type": "mixed", "mode": "smart"},
+            ] + ([{"port": socks5_port, "type": "socks5", "mode": "smart"}] if socks5_enabled else []),
         },
 
         "dashboard": {
@@ -732,14 +722,15 @@ def _instructions_step_by_step(answers, cfg, auth_key, worker_url, forwarder_url
     print()
 
     _host = "0.0.0.0" if cfg["proxies"]["lan_sharing"] else "127.0.0.1"
-    _http_port = cfg["proxies"]["http"]["port"]
-    _socks_port = cfg["proxies"]["socks5"]["port"]
+    _listeners = cfg["proxies"].get("listeners", [])
     _dash_port = cfg["dashboard"]["port"]
     _pac_port = cfg["pac"]["port"]
 
-    print(f"  HTTP Proxy:  {_host}:{_http_port}")
-    if cfg["proxies"]["socks5"]["enabled"]:
-        print(f"  SOCKS5:      {_host}:{_socks_port}")
+    for l in _listeners:
+        ltype = l.get("type", "mixed").upper()
+        if ltype == "MIXED":
+            ltype = "HTTP/SOCKS5"
+        print(f"  {ltype}:  {_host}:{l['port']} (mode={l.get('mode','smart')})")
     print(f"  PAC URL:     http://{_host}:{_pac_port}/proxy.pac")
     print(f"  Dashboard:   http://{_host}:{_dash_port}/dashboard")
     print()
@@ -797,14 +788,15 @@ def _instructions_all_at_once(answers, cfg, auth_key, worker_url, forwarder_url)
     print()
 
     _host = "0.0.0.0" if cfg["proxies"]["lan_sharing"] else "127.0.0.1"
-    _http_port = cfg["proxies"]["http"]["port"]
-    _socks_port = cfg["proxies"]["socks5"]["port"]
+    _listeners = cfg["proxies"].get("listeners", [])
     _dash_port = cfg["dashboard"]["port"]
     _pac_port = cfg["pac"]["port"]
 
-    print(f"    HTTP:      {_host}:{_http_port}")
-    if cfg["proxies"]["socks5"]["enabled"]:
-        print(f"    SOCKS5:    {_host}:{_socks_port}")
+    for l in _listeners:
+        ltype = l.get("type", "mixed").upper()
+        if ltype == "MIXED":
+            ltype = "HTTP/SOCKS5"
+        print(f"    {ltype}:    {_host}:{l['port']} (mode={l.get('mode','smart')})")
     print(f"    PAC:       http://{_host}:{_pac_port}/proxy.pac")
     print(f"    Dashboard: http://{_host}:{_dash_port}/dashboard")
     print()
