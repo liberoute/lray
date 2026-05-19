@@ -1,7 +1,18 @@
 # ignore secrets and user config
 .env
 config.json
+config.json.*
 ca/
+
+# Patterniha sync cache
+patterniha_config.json
+patterniha_state.json
+
+# Smart router cache
+routing_cache.json
+
+# Generated files (by setup wizard)
+dist/
 
 # ignore python venv
 .venv/
@@ -33,3 +44,19 @@ Thumbs.db
 
 # Temp MITM certs
 domainfront_certs_*/
+
+# Deploy runtime data
+deploy/upstream_forwarder/.env
+deploy/upstream_forwarder/docker-compose.override.yml
+deploy/upstream_forwarder/data/
+deploy/upstream_forwarder/certs/
+deploy/self-hosted-exit/.env
+
+# Generated output
+output/
+dist/
+release/
+
+# PyInstaller
+build/
+*.spec

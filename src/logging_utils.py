@@ -177,30 +177,54 @@ class PrettyFormatter(logging.Formatter):
 def configure(level: str = "INFO", *, stream=None) -> None:
     """Install the pretty formatter on the root logger.
 
+    Splits output:
+      - INFO/DEBUG → stdout (access log when using systemd)
+      - WARNING/ERROR/CRITICAL → stderr (error log when using systemd)
+
     Safe to call multiple times; replaces prior handlers set up by this
     module and leaves unrelated handlers alone (for tests / embedding).
     """
-    stream = stream or sys.stderr
-    use_color = _supports_color(stream)
-
-    handler = logging.StreamHandler(stream)
-    handler.setFormatter(PrettyFormatter(use_color=use_color))
-    handler.set_name("mhrvpn.pretty")
-
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
     # Remove previous pretty handler(s) we installed.
     for h in list(root.handlers):
-        if getattr(h, "name", "") == "mhrvpn.pretty":
+        if getattr(h, "name", "") in ("lray.pretty", "lray.stdout", "lray.stderr"):
             root.removeHandler(h)
-    root.addHandler(handler)
 
-    # Suppress cosmetic asyncio warning spam:
-    #   "returning true from eof_received() has no effect when using ssl"
-    # It originates in Python's own StreamReaderProtocol when we wrap a
-    # stream in TLS via start_tls(); there's nothing actionable to do.
+    if stream:
+        # Single stream mode (e.g. for testing)
+        use_color = _supports_color(stream)
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(PrettyFormatter(use_color=use_color))
+        handler.set_name("lray.pretty")
+        root.addHandler(handler)
+    else:
+        # Split mode: INFO→stdout, WARNING+→stderr
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setFormatter(PrettyFormatter(use_color=_supports_color(sys.stdout)))
+        stdout_handler.set_name("lray.stdout")
+        stdout_handler.addFilter(_MaxLevelFilter(logging.INFO))
+        root.addHandler(stdout_handler)
+
+        stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.setFormatter(PrettyFormatter(use_color=_supports_color(sys.stderr)))
+        stderr_handler.set_name("lray.stderr")
+        stderr_handler.setLevel(logging.WARNING)
+        root.addHandler(stderr_handler)
+
+    # Suppress cosmetic asyncio warning spam
     _install_asyncio_noise_filter()
+
+
+class _MaxLevelFilter(logging.Filter):
+    """Only allow records at or below the given level."""
+    def __init__(self, max_level: int):
+        super().__init__()
+        self._max = max_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno <= self._max
 
 
 class _AsyncioNoiseFilter(logging.Filter):
@@ -234,7 +258,7 @@ def print_banner(version: str, *, stream=None) -> None:
     def c(code: str) -> str:
         return code if color else ""
 
-    title = "mhr-cfw"
+    title = "lray"
     subtitle = "Domain-Fronted GAS-CFW Relay"
     version_tag = f"v{version}"
 

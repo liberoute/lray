@@ -107,7 +107,7 @@ class DomainFronter:
     )
     _SAFE_RETRY_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, quota_tracker=None):
         self.connect_host = config.get("google_ip", "216.239.38.120")
         self.sni_host = config.get("front_domain", "www.google.com")
         # SNI rotation pool — rotated per new outbound TLS connection so
@@ -123,6 +123,7 @@ class DomainFronter:
         self._script_idx = 0
         self.script_id = self._script_ids[0]  # backward compat / logging
         self._dev_available = False  # True if /dev endpoint works (no redirect, ~400ms faster)
+        self._quota_tracker = quota_tracker
 
         # Fan-out parallel relay: fire N Apps Script instances concurrently,
         # keep the first successful response, cancel the rest. Script IDs
@@ -394,22 +395,40 @@ class DomainFronter:
                     pass
 
     def _next_script_id(self) -> str:
-        """Round-robin across script IDs for load distribution.
+        """Round-robin across script IDs with quota-aware selection.
 
-        Skips script IDs currently in the short-term blacklist (failing
-        or slow) unless *all* are blacklisted, in which case we fall back
-        to plain round-robin so traffic can still flow.
+        Priority:
+          1. Skip blacklisted scripts (failing/slow)
+          2. Skip quota-exhausted scripts (if quota_tracker is set)
+          3. Prefer scripts with more remaining quota
+          4. Fall back to round-robin if all are exhausted/blacklisted
         """
         n = len(self._script_ids)
+
+        # If quota tracker is available, prefer scripts with remaining quota
+        if self._quota_tracker:
+            best = self._quota_tracker.get_best_script(self._script_ids)
+            if best and not self._is_sid_blacklisted(best):
+                self._quota_tracker.record_request(best)
+                return best
+
+        # Standard round-robin with blacklist skip
         for _ in range(n):
             sid = self._script_ids[self._script_idx % n]
             self._script_idx += 1
             if not self._is_sid_blacklisted(sid):
+                if self._quota_tracker:
+                    if self._quota_tracker.is_exhausted(sid):
+                        continue
+                    self._quota_tracker.record_request(sid)
                 return sid
-        # All blacklisted — clear expired entries and fall back.
+
+        # All blacklisted/exhausted — clear and fall back
         self._prune_blacklist(force=True)
         sid = self._script_ids[self._script_idx % n]
         self._script_idx += 1
+        if self._quota_tracker:
+            self._quota_tracker.record_request(sid)
         return sid
 
     def _is_sid_blacklisted(self, sid: str) -> bool:
@@ -429,6 +448,10 @@ class DomainFronter:
                     sid[-8:] if len(sid) > 8 else sid,
                     int(self._blacklist_ttl),
                     f" ({reason})" if reason else "")
+        # Notify quota tracker if it looks like a quota issue
+        if self._quota_tracker and ("429" in reason or "quota" in reason.lower()
+                                     or "rate" in reason.lower()):
+            self._quota_tracker.record_exhausted(sid)
 
     def _prune_blacklist(self, force: bool = False) -> None:
         now = time.time()
@@ -1377,7 +1400,7 @@ class DomainFronter:
         log.info("Parallel streaming download: %d bytes, %d chunks of %d KB",
                  total_size, len(ranges) + 1, chunk_size // 1024)
 
-        temp_file = tempfile.TemporaryFile(prefix="mhrvpn_dl_")
+        temp_file = tempfile.TemporaryFile(prefix="lray_dl_")
         file_lock = asyncio.Lock()
         sem = asyncio.Semaphore(max_parallel)
         cancel_event = asyncio.Event()

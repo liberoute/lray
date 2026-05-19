@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>lray Dashboard</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #242836;
+  --border: #2e3345;
+  --text: #e4e7ef;
+  --text2: #8b92a8;
+  --accent: #6366f1;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+  --blue: #3b82f6;
+  --radius: 12px;
+}
+[data-theme="light"] {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --surface2: #f0f1f3;
+  --border: #e2e4e9;
+  --text: #1a1d27;
+  --text2: #6b7280;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header .version {
+  font-size: 0.75rem;
+  background: var(--surface2);
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--text2);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status-badge.online {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--green);
+}
+
+.status-badge.offline {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.card-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text2);
+  margin-bottom: 8px;
+}
+
+.card-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-sub {
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
+.card-value.green { color: var(--green); }
+.card-value.blue { color: var(--blue); }
+.card-value.orange { color: var(--orange); }
+.card-value.red { color: var(--red); }
+
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Bar chart */
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 80px;
+  padding-top: 8px;
+}
+
+.bar {
+  flex: 1;
+  min-width: 4px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.3s ease;
+  opacity: 0.8;
+}
+
+.bar:hover {
+  opacity: 1;
+}
+
+.chart-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.65rem;
+  color: var(--text2);
+}
+
+/* Table */
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--text2);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+tr:last-child td { border-bottom: none; }
+
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.tag-relay { background: rgba(99, 102, 241, 0.2); color: var(--accent); }
+.tag-direct { background: rgba(34, 197, 94, 0.2); color: var(--green); }
+.tag-cached { background: rgba(245, 158, 11, 0.2); color: var(--orange); }
+.tag-blocked { background: rgba(239, 68, 68, 0.2); color: var(--red); }
+
+/* Info grid */
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.info-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.info-item:last-child { border-bottom: none; }
+.info-key { color: var(--text2); }
+.info-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Footer */
+.footer {
+  text-align: center;
+  color: var(--text2);
+  font-size: 0.7rem;
+  margin-top: 24px;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  body { padding: 12px; }
+  .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .card { padding: 14px; }
+  .card-value { font-size: 1.4rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>
+    ⚡ lray
+    <span class="version" id="version">v—</span>
+  </h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button onclick="toggleTheme()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;color:var(--text);font-size:.8rem" id="theme-btn">🌙</button>
+    <div class="status-badge online" id="status-badge">
+      <span class="status-dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </div>
+</div>
+
+<!-- Stats cards -->
+<div class="grid">
+  <div class="card">
+    <div class="card-label">Total Requests</div>
+    <div class="card-value blue" id="total-requests">—</div>
+    <div class="card-sub" id="requests-rate">— req/s</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Active Connections</div>
+    <div class="card-value green" id="active-conns">—</div>
+    <div class="card-sub" id="peak-conns">peak: —</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Cache Hit Rate</div>
+    <div class="card-value orange" id="cache-rate">—%</div>
+    <div class="card-sub" id="cache-detail">— hits / — misses</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Bandwidth</div>
+    <div class="card-value" id="bandwidth">—</div>
+    <div class="card-sub" id="bandwidth-rate">— /s</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Relay Latency (avg)</div>
+    <div class="card-value" id="latency">— ms</div>
+    <div class="card-sub" id="latency-detail">min — / max —</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Uptime</div>
+    <div class="card-value green" id="uptime">—</div>
+    <div class="card-sub" id="started-at">since —</div>
+  </div>
+</div>
+
+<!-- Traffic chart -->
+<div class="section">
+  <div class="section-title">📊 Traffic (last 60s)</div>
+  <div class="bar-chart" id="traffic-chart"></div>
+  <div class="chart-labels">
+    <span>60s ago</span>
+    <span>now</span>
+  </div>
+</div>
+
+<!-- Top hosts -->
+<div class="section">
+  <div class="section-title">🌐 Top Hosts</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Host</th>
+          <th>Requests</th>
+          <th>Bytes</th>
+          <th>Route</th>
+        </tr>
+      </thead>
+      <tbody id="hosts-table">
+        <tr><td colspan="4" style="color:var(--text2)">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- System info -->
+<div class="section">
+  <div class="section-title">⚙️ Configuration</div>
+  <div class="info-grid" id="config-info">
+    <div class="info-item"><span class="info-key">Loading...</span><span class="info-val">—</span></div>
+  </div>
+</div>
+
+<!-- DoH status -->
+<div class="section">
+  <div class="section-title">🔒 DNS-over-HTTPS</div>
+  <div class="info-grid" id="doh-info">
+    <div class="info-item"><span class="info-key">Status</span><span class="info-val">—</span></div>
+  </div>
+</div>
+
+<div class="footer">
+  lray Dashboard • Auto-refreshes every 2s • <span id="last-update">—</span>
+</div>
+
+<script>
+const API_BASE = "";  // same origin
+
+let prevTotal = 0;
+let prevTime = Date.now();
+let trafficHistory = new Array(60).fill(0);
+let peakConns = 0;
+
+async function fetchStats() {
+  try {
+    const resp = await fetch(API_BASE + "/dashboard/api/stats");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    return await resp.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + " MB";
+  return (bytes / 1073741824).toFixed(2) + " GB";
+}
+
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return d + "d " + h + "h";
+  if (h > 0) return h + "h " + m + "m";
+  return m + "m " + (seconds % 60) + "s";
+}
+
+function updateUI(data) {
+  if (!data) {
+    document.getElementById("status-badge").className = "status-badge offline";
+    document.getElementById("status-text").textContent = "Offline";
+    return;
+  }
+
+  document.getElementById("status-badge").className = "status-badge online";
+  document.getElementById("status-text").textContent = "Running";
+  document.getElementById("version").textContent = "v" + (data.version || "?");
+
+  // Requests
+  const total = data.total_requests || 0;
+  const now = Date.now();
+  const elapsed = (now - prevTime) / 1000;
+  const rate = elapsed > 0 ? ((total - prevTotal) / elapsed).toFixed(1) : "0";
+  prevTotal = total;
+  prevTime = now;
+
+  document.getElementById("total-requests").textContent = total.toLocaleString();
+  document.getElementById("requests-rate").textContent = rate + " req/s";
+
+  // Traffic history
+  trafficHistory.push(parseFloat(rate));
+  trafficHistory.shift();
+  renderChart();
+
+  // Connections
+  const conns = data.active_connections || 0;
+  peakConns = Math.max(peakConns, conns);
+  document.getElementById("active-conns").textContent = conns;
+  document.getElementById("peak-conns").textContent = "peak: " + peakConns;
+
+  // Cache
+  const hits = data.cache_hits || 0;
+  const misses = data.cache_misses || 0;
+  const cacheTotal = hits + misses;
+  const cacheRate = cacheTotal > 0 ? Math.round((hits / cacheTotal) * 100) : 0;
+  document.getElementById("cache-rate").textContent = cacheRate + "%";
+  document.getElementById("cache-detail").textContent = hits + " hits / " + misses + " misses";
+
+  // Bandwidth
+  const bytes = data.total_bytes || 0;
+  document.getElementById("bandwidth").textContent = formatBytes(bytes);
+  document.getElementById("bandwidth-rate").textContent = formatBytes(data.bytes_per_sec || 0) + "/s";
+
+  // Latency
+  document.getElementById("latency").textContent = (data.avg_latency_ms || 0) + " ms";
+  document.getElementById("latency-detail").textContent =
+    "min " + (data.min_latency_ms || 0) + " / max " + (data.max_latency_ms || 0);
+
+  // Uptime
+  const uptime = data.uptime_seconds || 0;
+  document.getElementById("uptime").textContent = formatUptime(uptime);
+  document.getElementById("started-at").textContent = "since " + (data.started_at || "—");
+
+  // Top hosts
+  renderHosts(data.top_hosts || []);
+
+  // Config
+  renderConfig(data.config || {});
+
+  // DoH
+  renderDoH(data.doh || {});
+
+  // Last update
+  document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
+}
+
+function renderChart() {
+  const chart = document.getElementById("traffic-chart");
+  const max = Math.max(...trafficHistory, 1);
+  chart.innerHTML = trafficHistory.map(v => {
+    const h = Math.max(2, (v / max) * 100);
+    return `<div class="bar" style="height:${h}%" title="${v.toFixed(1)} req/s"></div>`;
+  }).join("");
+}
+
+function renderHosts(hosts) {
+  const tbody = document.getElementById("hosts-table");
+  if (!hosts.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text2)">No data yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = hosts.slice(0, 15).map(h => {
+    const routeClass = h.route === "relay" ? "tag-relay" :
+                       h.route === "direct" ? "tag-direct" :
+                       h.route === "cached" ? "tag-cached" : "tag-blocked";
+    return `<tr>
+      <td>${escHtml(h.host)}</td>
+      <td>${(h.requests || 0).toLocaleString()}</td>
+      <td>${formatBytes(h.bytes || 0)}</td>
+      <td><span class="tag ${routeClass}">${h.route || "?"}</span></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderConfig(cfg) {
+  const el = document.getElementById("config-info");
+  const items = [
+    ["Listen", (cfg.host || "?") + ":" + (cfg.port || "?")],
+    ["SOCKS5", cfg.socks5 || "—"],
+    ["PAC", cfg.pac || "—"],
+    ["Front Domain", cfg.front_domain || "—"],
+    ["Google IP", cfg.google_ip || "—"],
+    ["Scripts", cfg.script_count || "—"],
+    ["DoH", cfg.doh_enabled ? "Enabled" : "Disabled"],
+    ["Mode", cfg.mode || "—"],
+  ];
+  el.innerHTML = items.map(([k, v]) =>
+    `<div class="info-item"><span class="info-key">${k}</span><span class="info-val">${v}</span></div>`
+  ).join("");
+}
+
+function renderDoH(doh) {
+  const el = document.getElementById("doh-info");
+  if (!doh || !doh.enabled) {
+    el.innerHTML = '<div class="info-item"><span class="info-key">Status</span><span class="info-val">Disabled</span></div>';
+    return;
+  }
+  const items = [
+    ["Status", "Active"],
+    ["Cached Entries", doh.cached || 0],
+    ["Queries", doh.queries || 0],
+    ["Fallbacks Used", doh.fallbacks || 0],
+  ];
+  if (doh.providers) {
+    doh.providers.forEach(p => {
+      items.push([p.name, p.failures > 0 ? `⚠️ ${p.failures} failures` : "✓ OK"]);
+    });
+  }
+  el.innerHTML = items.map(([k, v]) =>
+    `<div class="info-item"><span class="info-key">${k}</span><span class="info-val">${v}</span></div>`
+  ).join("");
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// Poll every 2 seconds
+async function poll() {
+  const data = await fetchStats();
+  updateUI(data);
+}
+
+poll();
+setInterval(poll, 2000);
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.getAttribute("data-theme") === "light" ? "" : "light";
+  html.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+  document.getElementById("theme-btn").textContent = next === "light" ? "☀️" : "🌙";
+}
+(function() {
+  const s = localStorage.getItem("theme");
+  if (s) { document.documentElement.setAttribute("data-theme", s); document.getElementById("theme-btn").textContent = s === "light" ? "☀️" : "🌙"; }
+})();
+</script>
+</body>
+</html>

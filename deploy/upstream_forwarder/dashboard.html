@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upstream Forwarder — Dashboard</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #242836;
+  --border: #2e3345;
+  --text: #e4e7ef;
+  --text2: #8b92a8;
+  --accent: #6366f1;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+  --blue: #3b82f6;
+  --radius: 12px;
+}
+[data-theme="light"] {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --surface2: #f0f1f3;
+  --border: #e2e4e9;
+  --text: #1a1d27;
+  --text2: #6b7280;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 24px;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.header h1 { font-size: 1.4rem; font-weight: 700; }
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.status-badge.online { background: rgba(34,197,94,0.15); color: var(--green); }
+.status-badge.offline { background: rgba(239,68,68,0.15); color: var(--red); }
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: currentColor; animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.card-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+.card-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.card-sub { font-size: 0.7rem; color: var(--text2); margin-top: 4px; }
+.card-value.green { color: var(--green); }
+.card-value.blue { color: var(--blue); }
+.card-value.orange { color: var(--orange); }
+.card-value.red { color: var(--red); }
+
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 20px;
+}
+.section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 70px;
+}
+.bar {
+  flex: 1;
+  min-width: 3px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.3s ease;
+  opacity: 0.8;
+}
+.bar:hover { opacity: 1; }
+.chart-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.6rem;
+  color: var(--text2);
+}
+
+.log-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.7rem;
+  max-height: 250px;
+  overflow-y: auto;
+  line-height: 1.6;
+  color: var(--text2);
+}
+.log-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-line.error { color: var(--red); }
+.log-line.warn { color: var(--orange); }
+.log-line.info { color: var(--text); }
+
+.progress-bar {
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.footer {
+  text-align: center;
+  color: var(--text2);
+  font-size: 0.65rem;
+  margin-top: 20px;
+}
+
+@media (max-width: 600px) {
+  body { padding: 12px; }
+  .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .card { padding: 12px; }
+  .card-value { font-size: 1.2rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ Upstream Forwarder</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button onclick="toggleTheme()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;color:var(--text);font-size:.8rem" id="theme-btn">🌙</button>
+    <div class="status-badge online" id="status-badge">
+      <span class="status-dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-label">Total Requests</div>
+    <div class="card-value blue" id="total-req">—</div>
+    <div class="card-sub" id="req-rate">— req/s</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Successful</div>
+    <div class="card-value green" id="success">—</div>
+    <div class="card-sub" id="success-pct">—%</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Failed</div>
+    <div class="card-value red" id="failed">—</div>
+    <div class="card-sub" id="failed-pct">—%</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Rate Limited</div>
+    <div class="card-value orange" id="rate-limited">—</div>
+    <div class="card-sub">blocked</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Avg Latency</div>
+    <div class="card-value" id="latency">— ms</div>
+    <div class="card-sub" id="latency-sub">per request</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Bandwidth Out</div>
+    <div class="card-value" id="bandwidth">—</div>
+    <div class="card-sub" id="bw-rate">total transferred</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Memory</div>
+    <div class="card-value" id="memory">— MB</div>
+    <div class="card-sub" id="mem-sub">RSS</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Uptime</div>
+    <div class="card-value green" id="uptime">—</div>
+    <div class="card-sub" id="started">since —</div>
+  </div>
+</div>
+
+<!-- Traffic chart -->
+<div class="section">
+  <div class="section-title">📊 Requests / second (last 60s)</div>
+  <div class="bar-chart" id="chart"></div>
+  <div class="chart-labels"><span>60s ago</span><span>now</span></div>
+</div>
+
+<!-- Success rate -->
+<div class="section">
+  <div class="section-title">✅ Success Rate</div>
+  <div style="display:flex;justify-content:space-between;font-size:0.8rem;">
+    <span id="sr-label">—%</span>
+    <span style="color:var(--text2)" id="sr-detail">— / —</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" id="sr-bar" style="width:0%;background:var(--green)"></div>
+  </div>
+</div>
+
+<!-- Recent activity log -->
+<div class="section">
+  <div class="section-title">📋 Recent Activity</div>
+  <div class="log-box" id="log-box">
+    <div class="log-line">Waiting for data...</div>
+  </div>
+</div>
+
+<div class="footer">
+  Upstream Forwarder Dashboard • Auto-refreshes every 2s • <span id="last-update">—</span>
+</div>
+
+<script>
+let prevTotal = 0;
+let prevTime = Date.now();
+let history = new Array(60).fill(0);
+let logLines = [];
+const MAX_LOG = 50;
+
+async function fetchStats() {
+  try {
+    const r = await fetch("/stats");
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch { return null; }
+}
+
+async function fetchLogs() {
+  try {
+    const r = await fetch("/dashboard/logs");
+    if (!r.ok) return [];
+    return await r.json();
+  } catch { return []; }
+}
+
+function fmtBytes(b) {
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return (b/1024).toFixed(1) + " KB";
+  if (b < 1073741824) return (b/1048576).toFixed(1) + " MB";
+  return (b/1073741824).toFixed(2) + " GB";
+}
+
+function fmtUptime(s) {
+  const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
+  if (d > 0) return d+"d "+h+"h";
+  if (h > 0) return h+"h "+m+"m";
+  return m+"m "+(s%60)+"s";
+}
+
+function update(data) {
+  if (!data) {
+    document.getElementById("status-badge").className = "status-badge offline";
+    document.getElementById("status-text").textContent = "Offline";
+    return;
+  }
+
+  document.getElementById("status-badge").className = "status-badge online";
+  document.getElementById("status-text").textContent = "Running";
+
+  const total = data.total_requests || 0;
+  const now = Date.now();
+  const elapsed = (now - prevTime) / 1000;
+  const rate = elapsed > 0 ? ((total - prevTotal) / elapsed) : 0;
+  prevTotal = total;
+  prevTime = now;
+
+  history.push(rate);
+  history.shift();
+  renderChart();
+
+  document.getElementById("total-req").textContent = total.toLocaleString();
+  document.getElementById("req-rate").textContent = rate.toFixed(1) + " req/s";
+
+  const succ = data.successful_fetches || 0;
+  const fail = data.failed_fetches || 0;
+  const succPct = total > 0 ? Math.round((succ/total)*100) : 0;
+  const failPct = total > 0 ? Math.round((fail/total)*100) : 0;
+
+  document.getElementById("success").textContent = succ.toLocaleString();
+  document.getElementById("success-pct").textContent = succPct + "% success";
+  document.getElementById("failed").textContent = fail.toLocaleString();
+  document.getElementById("failed-pct").textContent = failPct + "% of total";
+  document.getElementById("rate-limited").textContent = (data.rate_limited||0).toLocaleString();
+
+  document.getElementById("latency").textContent = (data.avg_latency_ms||0) + " ms";
+  document.getElementById("bandwidth").textContent = fmtBytes(data.total_bytes_out||0);
+  document.getElementById("memory").textContent = (data.memory_mb||0) + " MB";
+  document.getElementById("uptime").textContent = fmtUptime(data.uptime_seconds||0);
+  document.getElementById("started").textContent = "since " + (data.started_at||"—");
+
+  // Success rate bar
+  const srTotal = succ + fail;
+  const sr = srTotal > 0 ? Math.round((succ/srTotal)*100) : 100;
+  document.getElementById("sr-label").textContent = sr + "%";
+  document.getElementById("sr-detail").textContent = succ + " ok / " + fail + " failed";
+  const bar = document.getElementById("sr-bar");
+  bar.style.width = sr + "%";
+  bar.style.background = sr > 90 ? "var(--green)" : sr > 70 ? "var(--orange)" : "var(--red)";
+
+  document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
+}
+
+function renderChart() {
+  const el = document.getElementById("chart");
+  const max = Math.max(...history, 1);
+  el.innerHTML = history.map(v => {
+    const h = Math.max(2, (v/max)*100);
+    return `<div class="bar" style="height:${h}%" title="${v.toFixed(1)} req/s"></div>`;
+  }).join("");
+}
+
+function renderLogs(logs) {
+  if (!logs || !logs.length) return;
+  const box = document.getElementById("log-box");
+  logLines = logs.slice(-MAX_LOG);
+  box.innerHTML = logLines.map(l => {
+    const cls = l.includes("[ERROR]") ? "error" : l.includes("[WARN]") ? "warn" : "info";
+    return `<div class="log-line ${cls}">${escHtml(l)}</div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+async function poll() {
+  const [stats, logs] = await Promise.all([fetchStats(), fetchLogs()]);
+  update(stats);
+  renderLogs(logs);
+}
+
+poll();
+setInterval(poll, 2000);
+
+// Theme toggle
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute("data-theme");
+  const next = current === "light" ? "" : "light";
+  html.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+  document.getElementById("theme-btn").textContent = next === "light" ? "☀️" : "🌙";
+}
+// Load saved theme
+(function() {
+  const saved = localStorage.getItem("theme");
+  if (saved) {
+    document.documentElement.setAttribute("data-theme", saved);
+    document.getElementById("theme-btn").textContent = saved === "light" ? "☀️" : "🌙";
+  }
+})();
+</script>
+</body>
+</html>

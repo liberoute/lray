@@ -8,6 +8,7 @@ as JSON to script.google.com fronted through www.google.com).
 
 import asyncio
 import logging
+import os
 import re
 import socket
 import ssl
@@ -42,6 +43,12 @@ from constants import (
     UNCACHEABLE_HEADER_NAMES,
 )
 from domain_fronter import DomainFronter
+from doh_resolver import DoHResolver
+from pac_server import PACServer
+from dashboard_server import DashboardServer
+from smart_router import SmartRouter
+from quota_tracker import QuotaTracker
+from patterniha_sync import PatternihaSync
 
 log = logging.getLogger("Proxy")
 
@@ -191,7 +198,10 @@ class ProxyServer:
                 f"(both set to {self.port} on {self.host}). "
                 f"Change one of them in config.json."
             )
-        self.fronter = DomainFronter(config)
+        self._quota_tracker = QuotaTracker(config, data_dir=os.path.dirname(
+            config.get("_config_path", "config.json")
+        ) or ".")
+        self.fronter = DomainFronter(config, quota_tracker=self._quota_tracker)
         self.mitm = None
         self._cache = ResponseCache(max_mb=CACHE_MAX_MB)
         self._direct_fail_until: dict[str, float] = {}
@@ -267,6 +277,41 @@ class ProxyServer:
             log.error("Apps Script relay requires the 'cryptography' package.")
             log.error("Run: pip install cryptography")
             raise SystemExit(1)
+
+        # ── PAC file server ────────────────────────────────────────
+        self._pac_enabled = config.get("pac_enabled", True)
+        self._pac_port = config.get("pac_port", self.port + 1)
+        bypass_raw = config.get("bypass_hosts", [])
+        self._pac_server = PACServer(
+            proxy_host=self.host,
+            proxy_port=self.port,
+            socks_port=self.socks_port if self.socks_enabled else None,
+            pac_port=self._pac_port,
+            bypass_hosts=bypass_raw,
+        )
+
+        # ── DNS-over-HTTPS resolver ───────────────────────────────
+        self._doh_enabled = config.get("doh_enabled", True)
+        self._doh = DoHResolver() if self._doh_enabled else None
+
+        # ── Dashboard server ──────────────────────────────────────
+        self._dashboard_enabled = config.get("dashboard_enabled", True)
+        self._dashboard_port = config.get("dashboard_port", self.port + 2)
+        self._dashboard = DashboardServer(
+            proxy_server=self, port=self._dashboard_port
+        ) if self._dashboard_enabled else None
+
+        # ── Smart Router ──────────────────────────────────────────
+        self._smart_router = SmartRouter(
+            config,
+            data_dir=os.path.dirname(config.get("_config_path", "config.json")) or ".",
+        )
+
+        # ── Patterniha Sync (direct domain fronting without relay) ─
+        self._patterniha = PatternihaSync(
+            config,
+            data_dir=os.path.dirname(config.get("_config_path", "config.json")) or ".",
+        )
 
     # ── Host-policy helpers ───────────────────────────────────────
 
@@ -451,6 +496,7 @@ class ProxyServer:
     async def start(self):
         http_srv = await asyncio.start_server(self._on_client, self.host, self.port)
         socks_srv = None
+        pac_srv_obj = None
 
         if self.socks_enabled:
             try:
@@ -461,7 +507,22 @@ class ProxyServer:
                 log.error("SOCKS5 listener failed on %s:%d: %s",
                           self.socks_host, self.socks_port, e)
 
-        self._servers = [s for s in (http_srv, socks_srv) if s]
+        # PAC file server — auto-config for browsers
+        if self._pac_enabled:
+            pac_srv_obj = await self._pac_server.start(self.host)
+
+        # Dashboard server
+        dashboard_srv_obj = None
+        if self._dashboard_enabled and self._dashboard:
+            dashboard_srv_obj = await self._dashboard.start(self.host)
+
+        # Patterniha sync (direct domain fronting config)
+        if self._patterniha.enabled:
+            await self._patterniha.start()
+
+        # UDP tunnels (removed — CONNECT handles everything)
+
+        self._servers = [s for s in (http_srv, socks_srv, pac_srv_obj, dashboard_srv_obj) if s]
 
         log.info(
             "HTTP proxy listening on %s:%d",
@@ -512,6 +573,16 @@ class ProxyServer:
             await self.fronter.close()
         except Exception as exc:
             log.debug("fronter.close: %s", exc)
+
+        try:
+            await self._patterniha.stop()
+        except Exception as exc:
+            log.debug("patterniha.stop: %s", exc)
+
+        try:
+            self._smart_router.save_cache()
+        except Exception as exc:
+            log.debug("smart_router.save_cache: %s", exc)
 
     # ── client handler ────────────────────────────────────────────
 
@@ -677,6 +748,38 @@ class ProxyServer:
             await self._do_direct_tunnel(host, port, reader, writer)
             return
 
+        # ── Smart routing: try direct first if router says so ─────
+        if self._smart_router.enabled and port == 443:
+            route = self._smart_router.get_route(host)
+            if route == "direct":
+                log.info("Smart route → %s (direct, learned)", host)
+                t0 = asyncio.get_event_loop().time()
+                ok = await self._do_direct_tunnel(host, port, reader, writer, timeout=4.0)
+                if ok:
+                    latency = (asyncio.get_event_loop().time() - t0) * 1000
+                    self._smart_router.record_direct_success(host, latency)
+                    return
+                self._smart_router.record_direct_failure(host)
+                log.info("Smart route fallback → %s (direct failed, switching to relay)", host)
+                await self._do_mitm_connect(host, port, reader, writer)
+                return
+            elif route == "probe":
+                log.info("Smart route → %s (probing direct...)", host)
+                t0 = asyncio.get_event_loop().time()
+                ok = await self._do_direct_tunnel(host, port, reader, writer, timeout=4.0)
+                if ok:
+                    latency = (asyncio.get_event_loop().time() - t0) * 1000
+                    self._smart_router.record_direct_success(host, latency)
+                    return
+                self._smart_router.record_direct_failure(host)
+                log.info("Smart route → %s (probe failed, using relay)", host)
+                await self._do_mitm_connect(host, port, reader, writer)
+                return
+            elif route == "relay":
+                # Smart router says relay — skip direct attempt
+                pass
+            # "forwarder" route is handled by domain_fronter via forwarder_hosts
+
         # ── IP-literal destinations ───────────────────────────────
         # Prefer a direct tunnel first (works for unblocked IPs and keeps
         # TLS end-to-end). If the network blocks the route (common for
@@ -725,6 +828,14 @@ class ProxyServer:
                      host, override_ip, self.fronter.sni_host)
             await self._do_sni_rewrite_tunnel(host, port, reader, writer,
                                               connect_ip=override_ip)
+        elif self._patterniha_route(host):
+            # Patterniha direct domain fronting — no relay needed
+            mapping = self._patterniha.get_sni_mapping(host)
+            log.info("Patterniha direct → %s (SNI: %s, via: %s)",
+                     host, mapping.sni, mapping.connect_host)
+            await self._do_sni_rewrite_tunnel(host, port, reader, writer,
+                                              connect_ip=mapping.connect_host,
+                                              override_sni=mapping.sni)
         elif self._is_google_domain(host):
             if self._direct_temporarily_disabled(host):
                 log.info("Relay fallback → %s (direct tunnel temporarily disabled)", host)
@@ -784,6 +895,12 @@ class ProxyServer:
             if h == suffix or h.endswith("." + suffix):
                 return self.fronter.connect_host  # configured google_ip
         return None
+
+    def _patterniha_route(self, host: str) -> bool:
+        """Check if patterniha has a direct domain fronting mapping for this host."""
+        if not self._patterniha.enabled:
+            return False
+        return self._patterniha.get_sni_mapping(host) is not None
 
     def _hosts_ip(self, host: str) -> str | None:
         """Return override IP for host if defined in config 'hosts', else None.
@@ -907,19 +1024,36 @@ class ProxyServer:
                     timeout=timeout,
                 )
             except Exception as exc:
-                raise OSError(f"dns lookup failed for {lookup_target}: {exc!r}") from exc
+                # System DNS failed — try DNS-over-HTTPS as fallback
+                if self._doh:
+                    log.debug("System DNS failed for %s, trying DoH", lookup_target)
+                    doh_ip = await self._doh.resolve(lookup_target)
+                    if doh_ip:
+                        log.debug("DoH resolved %s → %s", lookup_target, doh_ip)
+                        candidates = [(socket.AF_INET, doh_ip)]
+                        infos = None
+                    else:
+                        raise OSError(
+                            f"dns lookup failed for {lookup_target} "
+                            f"(system + DoH): {exc!r}"
+                        ) from exc
+                else:
+                    raise OSError(
+                        f"dns lookup failed for {lookup_target}: {exc!r}"
+                    ) from exc
 
-            candidates = []
-            seen = set()
-            for family, _type, _proto, _canon, sockaddr in infos:
-                ip = sockaddr[0]
-                key = (family, ip)
-                if key in seen:
-                    continue
-                seen.add(key)
-                candidates.append((family, ip))
+            if infos is not None:
+                candidates = []
+                seen = set()
+                for family, _type, _proto, _canon, sockaddr in infos:
+                    ip = sockaddr[0]
+                    key = (family, ip)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    candidates.append((family, ip))
 
-            candidates.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
+                candidates.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
 
         for family, ip in candidates:
             try:
@@ -996,15 +1130,16 @@ class ProxyServer:
     # ── SNI-rewrite tunnel ────────────────────────────────────────
 
     async def _do_sni_rewrite_tunnel(self, host: str, port: int, reader, writer,
-                                     connect_ip: str | None = None):
+                                     connect_ip: str | None = None,
+                                     override_sni: str | None = None):
         """MITM-decrypt TLS from browser, then re-encrypt toward connect_ip
-        using SNI=front_domain (e.g. www.google.com).
+        using SNI=front_domain (e.g. www.google.com) or override_sni.
 
-        The ISP only ever sees SNI=www.google.com in the outgoing handshake,
+        The ISP only ever sees the safe SNI in the outgoing handshake,
         hiding the blocked hostname (e.g. www.youtube.com).
         """
         target_ip = connect_ip or self.fronter.connect_host
-        sni_out   = self.fronter.sni_host  # e.g. "www.google.com"
+        sni_out   = override_sni or self.fronter.sni_host  # e.g. "www.google.com"
 
         # Step 1: MITM — accept TLS from the browser
         ssl_ctx_server = self.mitm.get_server_context(host)

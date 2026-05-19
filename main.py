@@ -209,8 +209,13 @@ def main():
         )
         sys.exit(1)
 
+    # Normalize nested config to flat format (backward compatible)
+    from config_parser import normalize_config
+    config = normalize_config(config)
+
     # Always Apps Script mode — force-set for backward-compat configs.
     config["mode"] = "apps_script"
+    config["_config_path"] = os.path.abspath(config_path)
     sid = config.get("script_ids") or config.get("script_id")
     if not sid or (isinstance(sid, str) and sid == "YOUR_APPS_SCRIPT_DEPLOYMENT_ID"):
         print("Missing 'script_id' in config.")
@@ -310,9 +315,20 @@ async def _run(config):
     _log = logging.getLogger("asyncio")
     loop.set_exception_handler(_make_exception_handler(_log))
     server = ProxyServer(config)
+
+    # Start config hot-reload watcher
+    config_watcher = None
+    if config.get("hot_reload", True):
+        from config_watcher import ConfigWatcher
+        config_path = config.get("_config_path", "config.json")
+        config_watcher = ConfigWatcher(config_path, server)
+        await config_watcher.start()
+
     try:
         await server.start()
     finally:
+        if config_watcher:
+            await config_watcher.stop()
         await server.stop()
 
 

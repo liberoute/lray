@@ -1,18 +1,30 @@
-name: "mhr-cfw-docker"
+name: "lray"
 
 services:
-  mhr-cfw:
-    image: .
-    container_name: "mhr-cfw"
+  lray:
+    build: .
+    container_name: "lray"
     restart: unless-stopped
-    networks:
-      - mhr-cfw-proxy
+    env_file:
+      - .env
     ports:
-      - "8085:8085" # http port
-      - "1080:1080" # socks5 port
-
-networks:
-  mhr-cfw-proxy:
-    name: mhr-cfw-proxy
-    driver: bridge
-    external: false
+      - "${HTTP_PORT:-8085}:${HTTP_PORT:-8085}"
+      - "${SOCKS5_PORT:-1080}:${SOCKS5_PORT:-1080}"
+      - "${PAC_PORT:-8086}:${PAC_PORT:-8086}"
+      - "${DASHBOARD_PORT:-8087}:${DASHBOARD_PORT:-8087}"
+    volumes:
+      - "./config.json:/app/config.json:ro"
+      - "./ca:/app/ca"
+    environment:
+      DFT_CONFIG: /app/config.json
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', ${HTTP_PORT:-8085})); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

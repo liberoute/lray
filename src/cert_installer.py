@@ -6,7 +6,7 @@ Also attempts to install into Firefox's NSS certificate store when found.
 
 Usage:
     from cert_installer import install_ca, is_ca_trusted
-    install_ca("/path/to/ca.crt", cert_name="mhr-cfw")
+    install_ca("/path/to/ca.crt", cert_name="lray")
 """
 
 import glob
@@ -20,7 +20,7 @@ import tempfile
 
 log = logging.getLogger("Cert")
 
-CERT_NAME = "MHR-CFW"
+CERT_NAME = "lray"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

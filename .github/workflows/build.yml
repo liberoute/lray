@@ -1,0 +1,91 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            name: linux-amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            name: linux-arm64
+          - os: windows-latest
+            arch: amd64
+            name: windows-amd64
+          - os: macos-latest
+            arch: arm64
+            name: macos-arm64
+          - os: macos-13
+            arch: amd64
+            name: macos-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Get version
+        id: version
+        shell: python
+        run: |
+          import os, re
+          with open("src/constants.py") as f:
+              m = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
+          version = m.group(1) if m else "0.0.0"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version={version}\n")
+
+      - name: Build binary
+        run: |
+          pyinstaller --onefile --name lray-${{ matrix.name }} --paths src --hidden-import h2 --hidden-import hpack --hidden-import hyperframe --hidden-import brotli --hidden-import zstandard --hidden-import certifi cli.py
+
+      - name: Package (Linux/Mac)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          zip ../lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}.zip lray-${{ matrix.name }}
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path "lray-${{ matrix.name }}.exe" -DestinationPath "../lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}
+          path: lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
