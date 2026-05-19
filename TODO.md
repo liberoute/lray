@@ -9,8 +9,8 @@
 - [x] PAC file server
 - [x] DNS-over-HTTPS
 - [x] Config hot-reload
-- [x] Web dashboard (local + server + Worker + GAS)
-- [x] Smart routing (auto-learn direct vs relay)
+- [x] Web dashboard (local + server + Worker + GAS + scripts + router + patterniha)
+- [x] Smart routing (auto-learn direct vs relay, persistent cache)
 - [x] 4 exit modes (gas, cfw, vps, cfw_vps)
 - [x] Setup wizard (interactive, code generation, output/)
 - [x] Update mechanism (update.zip)
@@ -33,22 +33,28 @@
 - [x] Self-update (binary + git)
 - [x] SSH via CONNECT proxy (no extra tunnel needed)
 - [x] Patterniha sync (auto-fetch MITM-DomainFronting config for direct access)
+- [x] Multi-listener proxies (type: mixed/http/socks5/mtproto, mode: smart/relay/direct/mitm)
+- [x] Smart router cache persistence (routing_cache.json, 24h expiry, max 5000)
 
 ## TODO ❌
 
 ### High Priority
-- [ ] Multi-listener proxies — define multiple listeners with different types/modes:
-  ```json
-  "proxies": [
-    { "port": 8085, "type": "mixed", "mode": "smart" },
-    { "port": 8086, "type": "http",  "mode": "relay" },
-    { "port": 1080, "type": "socks5","mode": "direct" },
-    { "port": 8443, "type": "mtproto","mode": "relay", "secret": "..." }
-  ]
-  ```
-  Types: http, socks5, mixed (auto-detect), mtproto
-  Modes: smart (direct→mitm→relay), relay (always GAS), direct, mitm (SNI rewrite only)
-- [ ] MTProto proxy — persistent tunnel for Telegram, batch/multiplex to reduce quota
+- [ ] MTProto proxy for Telegram — reduce quota usage
+  - Telegram sends many small requests (polling, updates, media)
+  - MTProto protocol: obfuscated TCP, secret-based auth
+  - Strategy: batch multiple Telegram requests into single relay call
+  - Persistent connection to relay (keep-alive, multiplex)
+  - Separate quota bucket for Telegram traffic
+  - Config: `{ "port": 8443, "type": "mtproto", "mode": "relay", "secret": "ee..." }`
+  - Client connects with MTProto secret → lray decodes → batches → relays
+  - Reduces 100 small requests to ~10 batched relay calls
+- [ ] Relay compression (gzip) — compress traffic between lray and GAS
+  - Per-listener option: `"compress": true`
+  - Request body gzip before sending to GAS
+  - Response gzip from GAS
+  - 60-80% bandwidth reduction for text content
+  - Especially effective with MTProto batching (batch + gzip = 90%+ reduction)
+  - Optional per-listener (disable on weak CPU like Orange Pi)
 - [ ] Multi-mode per-request — vps + cfw_vps simultaneously (fallback)
 - [ ] Code uglify/minify (terser) in addition to obfuscation
 
@@ -58,6 +64,7 @@
 - [ ] Prometheus + Grafana monitoring
 - [ ] Web-based setup wizard (browser UI instead of CLI)
 - [ ] Config validation on startup (warn about bad values)
+- [ ] README فارسی
 
 ### Low Priority / Future
 - [ ] VPN/TUN mode (system-wide, no browser config needed)

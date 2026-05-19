@@ -49,6 +49,7 @@ from dashboard_server import DashboardServer
 from smart_router import SmartRouter
 from quota_tracker import QuotaTracker
 from patterniha_sync import PatternihaSync
+from mtproto_proxy import MTProtoProxy
 
 log = logging.getLogger("Proxy")
 
@@ -498,6 +499,8 @@ class ProxyServer:
     async def start(self):
         # ── Start all proxy listeners ─────────────────────────────
         listener_servers = []
+        self._mtproto_proxies: list[MTProtoProxy] = []
+
         for listener in self._listeners:
             port = int(listener["port"])
             ltype = listener.get("type", "mixed")
@@ -510,10 +513,15 @@ class ProxyServer:
                         self.host, port,
                     )
                 elif ltype == "mtproto":
-                    # MTProto placeholder — for now just log
-                    log.info("MTProto listener on %s:%d (mode=%s) — not yet implemented",
-                             self.host, port, mode)
-                    continue
+                    # MTProto proxy with batching
+                    mtp = MTProtoProxy(listener, relay_func=self._mtproto_relay)
+                    self._mtproto_proxies.append(mtp)
+                    srv = await asyncio.start_server(
+                        mtp.handle_connection,
+                        self.host, port,
+                    )
+                    log.info("MTProto proxy on %s:%d (secret=%s...)",
+                             self.host, port, listener.get("secret", "")[:8])
                 else:
                     # mixed or http — accept both HTTP and SOCKS5
                     srv = await asyncio.start_server(
@@ -1258,6 +1266,25 @@ class ProxyServer:
         """Handle plain HTTP over SOCKS5 in apps_script mode."""
         log.info("Plain HTTP relay → %s:%d", host, port)
         await self._relay_http_stream(host, port, reader, writer)
+
+    async def _mtproto_relay(self, data: bytes) -> bytes | None:
+        """Relay MTProto batch data through the GAS relay.
+
+        Called by MTProtoProxy for each batch of Telegram packets.
+        Uses the existing domain fronter infrastructure.
+        """
+        try:
+            # Use the fronter to relay as a special "mtproto" request
+            response = await self.fronter.relay_raw(
+                method="POST",
+                url="mtproto://relay",
+                headers={"X-MTProto": "1", "Content-Type": "application/octet-stream"},
+                body=data,
+            )
+            return response
+        except Exception as e:
+            log.debug("MTProto relay failed: %s", e)
+            return None
 
     async def _do_mitm_connect(self, host: str, port: int, reader, writer):
         """Intercept TLS, decrypt HTTP, and relay through Apps Script."""

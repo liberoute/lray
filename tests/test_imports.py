@@ -29,6 +29,7 @@ def test_all_imports():
         "config_parser",
         "branding",
         "patterniha_sync",
+        "mtproto_proxy",
     ]
 
     failed = []
