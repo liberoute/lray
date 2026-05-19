@@ -11,6 +11,9 @@ patterniha_state.json
 # Smart router cache
 routing_cache.json
 
+# AI context (internal, not for public)
+ai.md
+
 # Generated files (by setup wizard)
 dist/
 
