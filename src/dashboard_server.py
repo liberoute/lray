@@ -114,6 +114,10 @@ class DashboardServer:
                 route = "relay"
                 if hasattr(proxy, "_is_bypassed") and proxy._is_bypassed(host):
                     route = "direct"
+                elif hasattr(proxy, "_smart_router"):
+                    sr = proxy._smart_router.get_route(host)
+                    if sr == "direct":
+                        route = "direct"
                 top_hosts.append({
                     "host": host,
                     "requests": stat.requests,
@@ -135,12 +139,46 @@ class DashboardServer:
                 ],
             }
 
+        # Script/quota info
+        scripts_info = []
+        if hasattr(proxy, "_quota_tracker"):
+            qt = proxy._quota_tracker
+            qt_stats = qt.get_stats()
+            for script in qt_stats.get("scripts", []):
+                scripts_info.append({
+                    "id": script.get("id", "?"),
+                    "requests_today": script.get("requests_today", 0),
+                    "daily_limit": script.get("daily_limit", 20000),
+                    "active": not script.get("exhausted", False),
+                    "last_used": script.get("last_used", 0),
+                })
+
+        # Smart router stats
+        smart_router_info = {"enabled": False}
+        if hasattr(proxy, "_smart_router"):
+            smart_router_info = proxy._smart_router.get_stats()
+
+        # Patterniha stats
+        patterniha_info = {"enabled": False}
+        if hasattr(proxy, "_patterniha"):
+            patterniha_info = proxy._patterniha.get_stats()
+
+        # Listeners info
+        listeners_info = []
+        if hasattr(proxy, "_listeners"):
+            for l in proxy._listeners:
+                listeners_info.append({
+                    "port": l.get("port"),
+                    "type": l.get("type", "mixed"),
+                    "mode": l.get("mode", "smart"),
+                })
+
         # Config info
         script_ids = getattr(proxy.fronter, "_script_ids", [])
         config_info = {
             "host": proxy.host,
             "port": proxy.port,
-            "socks5": f"{proxy.socks_host}:{proxy.socks_port}" if proxy.socks_enabled else None,
+            "listeners": listeners_info,
             "pac": f"http://{proxy.host}:{proxy._pac_port}/proxy.pac" if proxy._pac_enabled else None,
             "front_domain": getattr(proxy.fronter, "sni_host", "—"),
             "google_ip": getattr(proxy.fronter, "connect_host", "—"),
@@ -169,6 +207,9 @@ class DashboardServer:
             "top_hosts": top_hosts,
             "config": config_info,
             "doh": doh_info,
+            "scripts": scripts_info,
+            "smart_router": smart_router_info,
+            "patterniha": patterniha_info,
         }
 
     async def _handle_request(self, reader: asyncio.StreamReader,
