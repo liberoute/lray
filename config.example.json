@@ -15,19 +15,10 @@
 
   "proxies": {
     "lan_sharing": false,
-    "http": {
-      "enabled": true,
-      "port": 8085
-    },
-    "socks5": {
-      "enabled": true,
-      "port": 1080
-    },
-    "mtproto": {
-      "enabled": false,
-      "port": 8443,
-      "secret": ""
-    }
+    "listeners": [
+      { "port": 8085, "type": "mixed", "mode": "smart" },
+      { "port": 1080, "type": "socks5", "mode": "smart" }
+    ]
   },
 
   "dashboard": {

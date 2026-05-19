@@ -1,4 +1,4 @@
-# lray v1.0.0
+# lray v1.1.0
 
 ### Domain-Fronted Relay — Bypass DPI Censorship
 

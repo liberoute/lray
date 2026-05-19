@@ -5,6 +5,7 @@
 ```json
 {
   "mode": "apps_script",
+  "exit_mode": "vps",
   "auth_key": "your-secret-key",
   "script_id": "your-deployment-id",
 
@@ -12,8 +13,6 @@
   "proxies": { ... },
   "dashboard": { ... },
   "pac": { ... },
-  "dns_relay": { ... },
-  "tunnels": { ... },
   "routing": { ... },
   "advanced": { ... }
 }
@@ -35,15 +34,77 @@
 
 ### proxies
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `lan_sharing` | `false` | Share proxy on LAN (binds to 0.0.0.0) |
-| `http.enabled` | `true` | Enable HTTP proxy |
-| `http.port` | `8085` | HTTP proxy port |
-| `socks5.enabled` | `true` | Enable SOCKS5 |
-| `socks5.port` | `1080` | SOCKS5 port |
-| `mtproto.enabled` | `false` | MTProto proxy (future) |
-| `mtproto.port` | `8443` | MTProto port |
+Two formats supported:
+
+#### New format (listeners array)
+
+```json
+"proxies": {
+  "lan_sharing": false,
+  "listeners": [
+    { "port": 8085, "type": "mixed", "mode": "smart" },
+    { "port": 1080, "type": "socks5", "mode": "relay" },
+    { "port": 9090, "type": "http", "mode": "direct" },
+    { "port": 8443, "type": "mtproto", "mode": "relay", "secret": "ee..." }
+  ]
+}
+```
+
+Each listener has:
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `port` | number | Port to listen on |
+| `type` | `mixed`, `http`, `socks5`, `mtproto` | Protocol to accept |
+| `mode` | `smart`, `relay`, `direct`, `mitm` | How to route traffic |
+| `secret` | string | MTProto secret (only for mtproto type) |
+
+**Types:**
+
+| Type | Description |
+|------|-------------|
+| `mixed` | Auto-detect HTTP or SOCKS5 from first byte (recommended) |
+| `http` | HTTP proxy only |
+| `socks5` | SOCKS5 proxy only |
+| `mtproto` | MTProto proxy for Telegram |
+
+**Modes:**
+
+| Mode | Description |
+|------|-------------|
+| `smart` | Try direct first (3s timeout), then MITM/relay. Learns over time. |
+| `relay` | Always route through GAS relay. Guaranteed to work for blocked sites. |
+| `direct` | Always connect directly. Fast, but only works for unblocked sites. |
+| `mitm` | SNI rewrite only (patterniha style). No relay, no quota usage. |
+
+**Example use cases:**
+
+```json
+"listeners": [
+  { "port": 8085, "type": "mixed", "mode": "smart" },
+  { "port": 8086, "type": "http", "mode": "relay" },
+  { "port": 1080, "type": "socks5", "mode": "direct" },
+  { "port": 8443, "type": "mtproto", "mode": "relay", "secret": "ee..." }
+]
+```
+
+- Port 8085: Main browser proxy — smart routing (learns what's blocked)
+- Port 8086: For apps that need guaranteed access — always relay
+- Port 1080: For downloads from unblocked sites — fast direct
+- Port 8443: Telegram MTProto — always relay
+
+#### Old format (still supported)
+
+```json
+"proxies": {
+  "lan_sharing": false,
+  "http": { "enabled": true, "port": 8085 },
+  "socks5": { "enabled": true, "port": 1080 },
+  "mtproto": { "enabled": false, "port": 8443, "secret": "" }
+}
+```
+
+Automatically converted to listeners internally.
 
 ### dashboard
 
@@ -61,32 +122,12 @@
 | `enabled` | `true` | Enable PAC file server |
 | `port` | `8086` | PAC port |
 
-### dns_relay
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `enabled` | `false` | Enable UDP DNS relay |
-| `port` | `5353` | Local DNS port |
-| `server` | `8.8.8.8` | Upstream DNS server |
-
-### tunnels
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `tcp` | `[]` | TCP tunnel definitions |
-| `udp` | `[]` | UDP tunnel definitions |
-
-TCP tunnel example:
-```json
-{ "name": "SSH", "local_port": 2222, "remote_host": "127.0.0.1", "remote_port": 22 }
-```
-
 ### routing
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `smart_routing` | `true` | Auto-learn direct vs relay |
-| `bypass_hosts` | `[...]` | Always direct |
+| `bypass_hosts` | `[...]` | Always direct (regardless of listener mode) |
 | `block_hosts` | `[]` | Always refuse |
 | `forwarder_hosts` | `[]` | Always through forwarder |
 | `youtube_via_relay` | `false` | Route YouTube through relay |
@@ -99,7 +140,7 @@ TCP tunnel example:
 | `hot_reload` | `true` | Watch config for changes |
 | `log_level` | `INFO` | DEBUG, INFO, WARNING, ERROR |
 | `patterniha_sync` | `true` | Auto-fetch patterniha MITM-DomainFronting config |
-| `hosts` | `{}` | Custom DNS overrides |
+| `hosts` | `{}` | Custom DNS overrides (domain → IP) |
 
 ### Patterniha Sync
 
@@ -109,6 +150,14 @@ When enabled, lray automatically fetches the latest [MITM-DomainFronting](https:
 - Caches config locally (`patterniha_config.json`)
 - Falls back to relay if direct fronting fails
 - Disable with `"patterniha_sync": false` in advanced config
+
+### Smart Router Cache
+
+The smart router persists learned routes to `routing_cache.json`:
+- Saves every 60 seconds and on shutdown
+- Loads on startup — no re-learning after restart
+- Entries expire after 24 hours
+- Max 5000 entries (keeps most recent)
 
 ## LAN Sharing
 

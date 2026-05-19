@@ -191,13 +191,15 @@ class ProxyServer:
         self.socks_enabled = config.get("socks5_enabled", True)
         self.socks_host = config.get("socks5_host", self.host)
         self.socks_port = config.get("socks5_port", 1080)
-        if self.socks_enabled and self.socks_host == self.host \
-                and int(self.socks_port) == int(self.port):
-            raise ValueError(
-                f"listen_port and socks5_port must differ on the same host "
-                f"(both set to {self.port} on {self.host}). "
-                f"Change one of them in config.json."
-            )
+
+        # ── Listeners (multi-port, multi-mode) ─────────────────────
+        self._listeners = config.get("listeners", [
+            {"port": self.port, "type": "mixed", "mode": "smart"},
+        ])
+        # Map port → listener config for per-connection mode lookup
+        self._listener_map: dict[int, dict] = {}
+        for l in self._listeners:
+            self._listener_map[int(l["port"])] = l
         self._quota_tracker = QuotaTracker(config, data_dir=os.path.dirname(
             config.get("_config_path", "config.json")
         ) or ".")
@@ -494,20 +496,37 @@ class ProxyServer:
                 log.info(log_msg, *log_args)
 
     async def start(self):
-        http_srv = await asyncio.start_server(self._on_client, self.host, self.port)
-        socks_srv = None
-        pac_srv_obj = None
+        # ── Start all proxy listeners ─────────────────────────────
+        listener_servers = []
+        for listener in self._listeners:
+            port = int(listener["port"])
+            ltype = listener.get("type", "mixed")
+            mode = listener.get("mode", "smart")
 
-        if self.socks_enabled:
             try:
-                socks_srv = await asyncio.start_server(
-                    self._on_socks_client, self.socks_host, self.socks_port
-                )
+                if ltype == "socks5":
+                    srv = await asyncio.start_server(
+                        lambda r, w, _p=port: self._on_socks_client(r, w, _p),
+                        self.host, port,
+                    )
+                elif ltype == "mtproto":
+                    # MTProto placeholder — for now just log
+                    log.info("MTProto listener on %s:%d (mode=%s) — not yet implemented",
+                             self.host, port, mode)
+                    continue
+                else:
+                    # mixed or http — accept both HTTP and SOCKS5
+                    srv = await asyncio.start_server(
+                        lambda r, w, _p=port: self._on_client(r, w, _p),
+                        self.host, port,
+                    )
+                listener_servers.append(srv)
+                log.info("Listener %s:%d type=%s mode=%s", self.host, port, ltype, mode)
             except OSError as e:
-                log.error("SOCKS5 listener failed on %s:%d: %s",
-                          self.socks_host, self.socks_port, e)
+                log.error("Failed to bind %s:%d: %s", self.host, port, e)
 
         # PAC file server — auto-config for browsers
+        pac_srv_obj = None
         if self._pac_enabled:
             pac_srv_obj = await self._pac_server.start(self.host)
 
@@ -520,30 +539,18 @@ class ProxyServer:
         if self._patterniha.enabled:
             await self._patterniha.start()
 
-        # UDP tunnels (removed — CONNECT handles everything)
+        self._servers = listener_servers + [s for s in (pac_srv_obj, dashboard_srv_obj) if s]
 
-        self._servers = [s for s in (http_srv, socks_srv, pac_srv_obj, dashboard_srv_obj) if s]
-
-        log.info(
-            "HTTP proxy listening on %s:%d",
-            self.host, self.port,
-        )
-        if socks_srv:
-            log.info(
-                "SOCKS5 proxy listening on %s:%d",
-                self.socks_host, self.socks_port,
-            )
+        if not listener_servers:
+            log.error("No listeners started!")
+            return
 
         try:
-            async with http_srv:
-                if socks_srv:
-                    async with socks_srv:
-                        await asyncio.gather(
-                            http_srv.serve_forever(),
-                            socks_srv.serve_forever(),
-                        )
-                else:
-                    await http_srv.serve_forever()
+            serve_tasks = [
+                asyncio.create_task(srv.serve_forever())
+                for srv in listener_servers
+            ]
+            await asyncio.gather(*serve_tasks)
         except asyncio.CancelledError:
             raise
 
@@ -586,8 +593,12 @@ class ProxyServer:
 
     # ── client handler ────────────────────────────────────────────
 
-    async def _on_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    async def _on_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                         listener_port: int = 0):
         addr = writer.get_extra_info("peername")
+        # Determine mode from listener config
+        listener_cfg = self._listener_map.get(listener_port, {})
+        conn_mode = listener_cfg.get("mode", "smart")
         task = self._track_current_task()
         try:
             first_line = await asyncio.wait_for(reader.readline(), timeout=30)
@@ -623,9 +634,9 @@ class ProxyServer:
             method = parts[0].upper()
 
             if method == "CONNECT":
-                await self._do_connect(parts[1], reader, writer)
+                await self._do_connect(parts[1], reader, writer, conn_mode)
             else:
-                await self._do_http(header_block, reader, writer)
+                await self._do_http(header_block, reader, writer, conn_mode)
 
         except asyncio.CancelledError:
             pass
@@ -642,8 +653,11 @@ class ProxyServer:
                 pass
 
     async def _on_socks_client(self, reader: asyncio.StreamReader,
-                               writer: asyncio.StreamWriter):
+                               writer: asyncio.StreamWriter,
+                               listener_port: int = 0):
         addr = writer.get_extra_info("peername")
+        listener_cfg = self._listener_map.get(listener_port, {})
+        conn_mode = listener_cfg.get("mode", "smart")
         task = self._track_current_task()
         try:
             header = await asyncio.wait_for(reader.readexactly(2), timeout=15)
@@ -690,7 +704,7 @@ class ProxyServer:
 
             writer.write(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
             await writer.drain()
-            await self._handle_target_tunnel(host, port, reader, writer)
+            await self._handle_target_tunnel(host, port, reader, writer, conn_mode)
 
         except asyncio.IncompleteReadError:
             pass
@@ -710,7 +724,7 @@ class ProxyServer:
 
     # ── CONNECT (HTTPS tunnelling) ────────────────────────────────
 
-    async def _do_connect(self, target: str, reader, writer):
+    async def _do_connect(self, target: str, reader, writer, mode: str = "smart"):
         host, _, port_str = target.rpartition(":")
         try:
             port = int(port_str) if port_str else 443
@@ -722,17 +736,18 @@ class ProxyServer:
         if not host:
             host, port = target, 443
 
-        log.info("CONNECT → %s:%d", host, port)
+        log.info("CONNECT → %s:%d (mode=%s)", host, port, mode)
 
         writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         await writer.drain()
 
-        await self._handle_target_tunnel(host, port, reader, writer)
+        await self._handle_target_tunnel(host, port, reader, writer, mode)
 
     async def _handle_target_tunnel(self, host: str, port: int,
                                     reader: asyncio.StreamReader,
-                                    writer: asyncio.StreamWriter):
-        """Route a target connection through the Apps Script relay."""
+                                    writer: asyncio.StreamWriter,
+                                    mode: str = "smart"):
+        """Route a target connection based on listener mode."""
         # ── Block / bypass policy ─────────────────────────────────
         if self._is_blocked(host):
             log.warning("BLOCKED → %s:%d (matches block_hosts)", host, port)
@@ -747,6 +762,40 @@ class ProxyServer:
             log.info("Bypass tunnel → %s:%d (matches bypass_hosts)", host, port)
             await self._do_direct_tunnel(host, port, reader, writer)
             return
+
+        # ── Mode-based routing ────────────────────────────────────
+        if mode == "direct":
+            # Direct mode: always connect directly, no relay
+            log.info("Direct mode → %s:%d", host, port)
+            await self._do_direct_tunnel(host, port, reader, writer)
+            return
+        elif mode == "relay":
+            # Relay mode: always go through GAS relay
+            log.info("Relay mode → %s:%d", host, port)
+            if port == 443:
+                await self._do_mitm_connect(host, port, reader, writer)
+            else:
+                await self._do_plain_http_tunnel(host, port, reader, writer)
+            return
+        elif mode == "mitm":
+            # MITM mode: SNI rewrite only (patterniha style), no GAS relay
+            override_ip = self._sni_rewrite_ip(host)
+            mapping = self._patterniha.get_sni_mapping(host)
+            if mapping:
+                log.info("MITM mode (patterniha) → %s (SNI: %s)", host, mapping.sni)
+                await self._do_sni_rewrite_tunnel(host, port, reader, writer,
+                                                  connect_ip=mapping.connect_host,
+                                                  override_sni=mapping.sni)
+            elif override_ip:
+                log.info("MITM mode (SNI rewrite) → %s via %s", host, override_ip)
+                await self._do_sni_rewrite_tunnel(host, port, reader, writer,
+                                                  connect_ip=override_ip)
+            else:
+                # No MITM mapping available, fall back to direct
+                log.info("MITM mode → %s (no mapping, trying direct)", host)
+                await self._do_direct_tunnel(host, port, reader, writer)
+            return
+        # mode == "smart" — continue with smart routing below
 
         # ── Smart routing: try direct first if router says so ─────
         if self._smart_router.enabled and port == 443:
@@ -1554,7 +1603,7 @@ class ProxyServer:
 
     # ── Plain HTTP forwarding ─────────────────────────────────────
 
-    async def _do_http(self, header_block: bytes, reader, writer):
+    async def _do_http(self, header_block: bytes, reader, writer, mode: str = "smart"):
         body = b""
         if _has_unsupported_transfer_encoding(header_block):
             log.warning("Unsupported Transfer-Encoding on plain HTTP request")

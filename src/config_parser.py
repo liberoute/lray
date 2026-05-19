@@ -27,17 +27,60 @@ def normalize_config(raw: dict) -> dict:
         cfg["lan_sharing"] = lan_sharing
         cfg["listen_host"] = "0.0.0.0" if lan_sharing else "127.0.0.1"
 
-        http = proxies.get("http", {})
-        cfg["listen_port"] = http.get("port", 8085)
+        # New format: listeners array
+        listeners = proxies.get("listeners")
+        if listeners and isinstance(listeners, list):
+            cfg["listeners"] = listeners
+            # Set legacy values from first http/mixed listener
+            for l in listeners:
+                if l.get("type") in ("http", "mixed"):
+                    cfg["listen_port"] = l.get("port", 8085)
+                    break
+            else:
+                cfg["listen_port"] = 8085
+            for l in listeners:
+                if l.get("type") == "socks5":
+                    cfg["socks5_enabled"] = True
+                    cfg["socks5_port"] = l.get("port", 1080)
+                    break
+            else:
+                cfg["socks5_enabled"] = False
+                cfg["socks5_port"] = 1080
+            for l in listeners:
+                if l.get("type") == "mtproto":
+                    cfg["mtproto_enabled"] = True
+                    cfg["mtproto_port"] = l.get("port", 8443)
+                    cfg["mtproto_secret"] = l.get("secret", "")
+                    break
+            else:
+                cfg["mtproto_enabled"] = False
+        else:
+            # Old format: separate http/socks5/mtproto sections
+            http = proxies.get("http", {})
+            cfg["listen_port"] = http.get("port", 8085)
 
-        socks5 = proxies.get("socks5", {})
-        cfg["socks5_enabled"] = socks5.get("enabled", True)
-        cfg["socks5_port"] = socks5.get("port", 1080)
+            socks5 = proxies.get("socks5", {})
+            cfg["socks5_enabled"] = socks5.get("enabled", True)
+            cfg["socks5_port"] = socks5.get("port", 1080)
 
-        mtproto = proxies.get("mtproto", {})
-        cfg["mtproto_enabled"] = mtproto.get("enabled", False)
-        cfg["mtproto_port"] = mtproto.get("port", 8443)
-        cfg["mtproto_secret"] = mtproto.get("secret", "")
+            mtproto = proxies.get("mtproto", {})
+            cfg["mtproto_enabled"] = mtproto.get("enabled", False)
+            cfg["mtproto_port"] = mtproto.get("port", 8443)
+            cfg["mtproto_secret"] = mtproto.get("secret", "")
+
+            # Build listeners from old format for unified handling
+            _listeners = []
+            if http.get("enabled", True):
+                _mode = "smart" if raw.get("routing", {}).get("smart_routing", True) else "relay"
+                _listeners.append({"port": cfg["listen_port"], "type": "mixed", "mode": _mode})
+            if cfg["socks5_enabled"]:
+                _listeners.append({"port": cfg["socks5_port"], "type": "socks5", "mode": _mode})
+            if cfg["mtproto_enabled"]:
+                _listeners.append({
+                    "port": cfg["mtproto_port"], "type": "mtproto",
+                    "mode": "relay", "secret": cfg["mtproto_secret"],
+                })
+            cfg["listeners"] = _listeners
 
     # ── Relay ─────────────────────────────────────────────────────────────────
     relay = raw.get("relay", {})

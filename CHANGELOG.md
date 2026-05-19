@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.1.0] — 2026-05-19
+
+### Added
+- **Multi-listener proxies** — define multiple listeners with different types and modes
+  - Types: `mixed` (HTTP+SOCKS5 auto-detect), `http`, `socks5`, `mtproto`
+  - Modes: `smart` (direct→mitm→relay), `relay` (always GAS), `direct`, `mitm` (SNI rewrite)
+- **Per-listener routing mode** — each port can have its own routing strategy
+- **Patterniha sync** — auto-fetches MITM-DomainFronting config for direct access without relay
+- **Smart router persistence** — learned routes cached to `routing_cache.json`, survives restarts
+- **Probe timeout reduced** — 3s instead of 4s for faster first-load
+
+### Changed
+- **Config format**: `proxies` section now supports `listeners` array (old format still works)
+- **Smart router**: cache persists to disk, max 5000 entries, 24h expiry
+- **Rebrand complete**: all `MHR_` env vars → `LRAY_`, no remaining old references
+- **Build system**: releases named `lray-{os}-{arch}-v{version}.zip`
+- **GitHub Actions**: builds zip packages instead of tar.gz
+- **README**: added credits section, release table, patterniha acknowledgment
+
+### Fixed
+- **exit_node.js**: duplicate `let server` declaration causing crash
+- **start.sh**: added `docker compose down` before `up` to prevent container name conflicts
+- **setup --update**: now correctly detects exit mode from `config.json`
+- **install.sh**: env vars renamed to `LRAY_*`
+
+---
+
 ## [1.0.0] — 2026-05-19
 
 ### Added
