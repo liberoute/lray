@@ -44,6 +44,14 @@ def main():
         # Auto-setup if first run
         config_path = os.environ.get("DFT_CONFIG", os.path.join(_HERE, "config.json"))
         if not os.path.exists(config_path) and not any(a.startswith("--config") for a in args):
+            # Skip wizard in frozen (PyInstaller) mode — setup module not bundled
+            if getattr(sys, 'frozen', False):
+                print()
+                print("  Error: config.json not found.")
+                print(f"  Expected at: {config_path}")
+                print()
+                print("  Create config.json manually or run from source: python setup.py")
+                sys.exit(1)
             print()
             print("  Welcome! No config.json found — running setup wizard...")
             print()
@@ -78,6 +86,13 @@ def main():
         # Auto-setup if no config exists
         config_path = os.environ.get("DFT_CONFIG", os.path.join(_HERE, "config.json"))
         if not os.path.exists(config_path):
+            if getattr(sys, 'frozen', False):
+                print()
+                print("  Error: config.json not found.")
+                print(f"  Expected at: {config_path}")
+                print()
+                print("  Create config.json manually or run from source: python setup.py")
+                sys.exit(1)
             print()
             print("  No config.json found — running setup wizard first...")
             print()
@@ -133,9 +148,6 @@ def main():
 
     elif command == "uninstall":
         _uninstall(args[1:])
-
-    elif command == "build":
-        _build_binary()
 
     elif command == "version":
         from constants import __version__
