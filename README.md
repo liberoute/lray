@@ -1,142 +1,95 @@
-# lray v1.1.0
+# lray (Go)
 
-### Domain-Fronted Relay — Bypass DPI Censorship
-
-Traffic goes through Google's infrastructure. DPI only sees `www.google.com`.
+Domain-fronted censorship bypass tool. Routes traffic through Google Apps Script, hiding it behind `www.google.com` SNI.
 
 ```
-Browser → Local Proxy → [SNI: www.google.com] → GAS → Exit → Internet
+Browser → lray (local proxy) → [SNI: www.google.com] → Google Apps Script → Exit → Internet
 ```
-
----
 
 ## Quick Start
 
 ```bash
-# Install
-git clone https://github.com/liberoute/lray.git && cd lray
-pip install -r requirements.txt
+# Build
+go build -o lray ./cmd/lray
 
-# Setup (interactive wizard)
-python setup.py
+# Copy and edit config
+cp config.example.json config.json
+# Edit config.json: set auth_key and script_id
 
 # Run
-lray
+./lray
 ```
 
-Or one-line install (Linux):
-```bash
-curl -sL https://raw.githubusercontent.com/liberoute/lray/main/install.sh | sudo bash
-lray setup
+## Usage
+
+```
+lray                          Start proxy (default)
+lray --config path.json       Use custom config
+lray --port 3000              Override listen port
+lray --scan                   Find fastest Google IP
+lray --install-cert           Install MITM CA certificate
+lray --log-level DEBUG        Set log level
+lray --version                Show version
 ```
 
-Pre-built binaries: [Releases](https://github.com/liberoute/lray/releases)
-
----
-
-## Choose Your Mode
-
-| You have | Best mode | Path |
-|---|---|---|
-| Only Google account | `gas` | GAS → internet |
-| Google + Cloudflare | `cfw` | GAS → Worker → internet |
-| Google + VPS | `vps` | GAS → VPS → internet |
-| Google + CF + VPS | `cfw_vps` | GAS → Worker → VPS → internet |
-
-The wizard asks and configures everything for you.
-
----
-
-## CLI Commands
+## Build
 
 ```bash
-lray                       # Start proxy
-lray setup                 # Interactive setup (from scratch)
-lray setup --rebuild       # Re-generate output/ without questions
-lray update                # Check for updates & self-update
-lray test                  # Test connectivity
-lray check                 # Validate config
-lray status                # Check if running
-lray scan                  # Find fastest Google IP
-lray install               # Install service + CA cert
-lray install --service     # Install systemd service only
-lray install --ca          # Install CA certificate only
-lray uninstall             # Remove everything
-lray uninstall --service   # Remove service only
-lray uninstall --ca        # Remove CA only
-lray --config path.json    # Start with custom config
-lray version               # Show version
+# Current platform
+make build
+
+# All platforms
+make build-all
+
+# Docker
+docker build -t lray .
+docker run -v ./config.json:/app/config.json -p 2801:2801 lray
 ```
 
----
+## Config
 
-## Documentation
+See `config.example.json`. Key fields:
 
-| Guide | Description |
-|---|---|
-| [Getting Started](docs/getting-started.md) | First-time setup guide |
-| [Exit Modes](docs/exit-modes.md) | Detailed explanation of all 4 modes |
-| [Server Deploy](docs/server-deploy.md) | Deploy on VPS (Docker) |
-| [Browser Setup](docs/browser-setup.md) | SwitchyOmega, FoxyProxy, system proxy |
-| [SSH Tunnel](docs/ssh-tunnel.md) | SSH through the proxy |
-| [Configuration](docs/configuration.md) | All config options |
-| [Dashboard](docs/dashboard.md) | Monitoring & dashboards |
-| [Building](docs/building.md) | Build binary from source |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues & fixes |
-| [Architecture](docs/architecture.md) | Technical deep-dive |
+| Field | Description |
+|-------|-------------|
+| `auth_key` | Shared secret (must match Code.gs) |
+| `script_id` | Apps Script deployment ID |
+| `relay.google_ip` | Google frontend IP to connect to |
+| `relay.front_domain` | SNI hostname (default: www.google.com) |
+| `proxies.listeners` | Port/type/mode for each listener |
+| `routing.youtube_via_relay` | Force YouTube through relay |
+| `routing.bypass_hosts` | Hosts to connect directly |
 
----
+## Listener Modes
 
-## Releases
+| Mode | Description |
+|------|-------------|
+| `smart` | Rule-based: config decides direct/relay/SNI per domain |
+| `relay` | Always MITM → relay through GAS |
+| `direct` | Connect directly, no relay |
 
-Pre-built binaries are available on the [Releases](https://github.com/liberoute/lray/releases) page.
+## Architecture
 
-Release naming: `lray-{os}-{arch}-v{version}.zip`
-
-| Platform | File |
-|---|---|
-| Linux x64 | `lray-linux-amd64-v1.0.0.zip` |
-| Linux ARM64 | `lray-linux-arm64-v1.0.0.zip` |
-| Windows x64 | `lray-windows-amd64-v1.0.0.zip` |
-| Windows ARM64 | `lray-windows-arm64-v1.0.0.zip` |
-| macOS ARM64 | `lray-macos-arm64-v1.0.0.zip` |
-| macOS x64 | `lray-macos-amd64-v1.0.0.zip` |
-
----
-
-## Inspiration & Credits
-
-lray is inspired by these projects:
-
-- [MasterHttpRelayVPN](https://github.com/masterking32/MasterHttpRelayVPN) — the original concept of domain fronting through Google Apps Script
-- [mhr-cfw](https://github.com/denuitt1/mhr-cfw) — Cloudflare Worker extension of the original
-- [MITM-DomainFronting](https://github.com/patterniha/MITM-DomainFronting) — MITM domain fronting approach by [@patterniha](https://github.com/patterniha)
-
-### Special Thanks — @patterniha
-
-The direct domain fronting method used in lray (the `patterniha_sync` module) is based on the pioneering work of [@patterniha](https://github.com/patterniha). Without their research and continuous updates to the MITM-DomainFronting config, this approach would not have been possible.
-
-If you find this useful, please consider supporting patterniha directly:
-
-- GitHub: [github.com/patterniha](https://github.com/patterniha)
-- Telegram: [@patterniha](https://t.me/patterniha)
-- USDT (BEP20): `0x76a768B53Ca77B43086946315f0BDF21156bF424`
-- USDT (TRC20): `TU5gKvKqcXPn8itp1DouBCwcqGHMemBm8o`
-
-### Differences from those projects
-
-- **Rewritten from scratch** — cleaner architecture, modular codebase
-- **4 exit modes** instead of single-mode — flexible deployment (gas, cfw, vps, cfw_vps)
-- **Self-hosted exit node** — no Cloudflare dependency required
-- **Setup wizard** — interactive config generation with code obfuscation
-- **Smart routing** — auto-learns which hosts need relay vs direct
-- **Multi-worker failover** — automatic failover across GAS scripts
-- **Dashboard** — real-time monitoring on all components (local, GAS, Worker, VPS)
-- **CLI tool** — unified interface with self-update
-- **Pre-built binaries** — no Python needed for end users
-
----
+```
+cmd/lray/           Entry point + CLI
+internal/
+  config/           Config parsing + hot-reload watcher
+  proxy/            Core proxy (HTTP/SOCKS5/CONNECT/MITM)
+  fronter/          Domain fronting relay engine
+  mitm/             TLS interception + cert generation
+  router/           Smart routing rules
+  resolver/         DNS-over-HTTPS
+  pac/              PAC file server
+  dashboard/        Web monitoring dashboard
+  quota/            GAS quota tracking
+  patterniha/       Patterniha config sync
+  mtproto/          MTProto proxy for Telegram
+  scanner/          Google IP scanner
+  certinstall/      Cross-platform CA installer
+  codec/            Content-encoding decoders
+  logger/           Colored logging
+```
 
 ## License
 
-[MIT](LICENSE)
+MIT

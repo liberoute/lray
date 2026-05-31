@@ -42,7 +42,7 @@ Two formats supported:
 "proxies": {
   "lan_sharing": false,
   "listeners": [
-    { "port": 8085, "type": "mixed", "mode": "smart" },
+    { "port": 2801, "type": "mixed", "mode": "smart" },
     { "port": 1080, "type": "socks5", "mode": "relay" },
     { "port": 9090, "type": "http", "mode": "direct" },
     { "port": 8443, "type": "mtproto", "mode": "relay", "secret": "ee..." }
@@ -56,7 +56,7 @@ Each listener has:
 |-----|--------|-------------|
 | `port` | number | Port to listen on |
 | `type` | `mixed`, `http`, `socks5`, `mtproto` | Protocol to accept |
-| `mode` | `smart`, `relay`, `direct`, `mitm` | How to route traffic |
+| `mode` | `smart`, `relay`, `full`, `direct`, `mitm` | How to route traffic |
 | `secret` | string | MTProto secret (only for mtproto type) |
 
 **Types:**
@@ -70,27 +70,30 @@ Each listener has:
 
 **Modes:**
 
-| Mode | Description |
-|------|-------------|
-| `smart` | Try direct first (3s timeout), then MITM/relay. Learns over time. |
-| `relay` | Always route through GAS relay. Guaranteed to work for blocked sites. |
-| `direct` | Always connect directly. Fast, but only works for unblocked sites. |
-| `mitm` | SNI rewrite only (patterniha style). No relay, no quota usage. |
+| Mode | Cert | Description |
+|------|------|-------------|
+| `smart` | ✅ | Rule-based routing: config decides direct/relay/SNI per domain. No probing, no timeout. |
+| `relay` | ✅ | Always MITM → JSON → GAS → exit. Guaranteed to work for blocked sites. |
+| `full` | ❌ | Raw TCP bytes → GAS → VPS. No decryption, no cert needed. |
+| `direct` | ❌ | Connect directly, no relay. Fast, only works for unblocked sites. |
+| `mitm` | ✅ | SNI rewrite only (patterniha style). No relay, no quota usage. |
 
 **Example use cases:**
 
 ```json
 "listeners": [
-  { "port": 8085, "type": "mixed", "mode": "smart" },
+  { "port": 2801, "type": "mixed", "mode": "smart" },
   { "port": 8086, "type": "http", "mode": "relay" },
   { "port": 1080, "type": "socks5", "mode": "direct" },
+  { "port": 9090, "type": "mixed", "mode": "full" },
   { "port": 8443, "type": "mtproto", "mode": "relay", "secret": "ee..." }
 ]
 ```
 
-- Port 8085: Main browser proxy — smart routing (learns what's blocked)
+- Port 2801: Main browser proxy — smart routing (config decides per domain)
 - Port 8086: For apps that need guaranteed access — always relay
 - Port 1080: For downloads from unblocked sites — fast direct
+- Port 9090: Raw TCP tunnel — no decryption, for opaque traffic to VPS
 - Port 8443: Telegram MTProto — always relay
 
 #### Old format (still supported)
@@ -126,11 +129,31 @@ Automatically converted to listeners internally.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `smart_routing` | `true` | Auto-learn direct vs relay |
-| `bypass_hosts` | `[...]` | Always direct (regardless of listener mode) |
-| `block_hosts` | `[]` | Always refuse |
+| `smart_routing` | `true` | Enable rule-based smart routing |
+| `bypass_hosts` | `["localhost", ".local", ".lan", ".home.arpa"]` | Always direct (no proxy) |
+| `block_hosts` | `[]` | Always refuse (403) |
 | `forwarder_hosts` | `[]` | Always through forwarder |
-| `youtube_via_relay` | `false` | Route YouTube through relay |
+| `youtube_via_relay` | `true` | Route YouTube + Google domains through relay |
+| `direct_google_exclude` | `[...]` | Google domains that always relay (e.g. gemini.google.com, drive.google.com) |
+| `direct_google_allow` | `[...]` | Google domains that use SNI rewrite (highest priority, e.g. drive.usercontent.google.com) |
+
+#### Smart Mode Routing Order
+
+When listener mode is `smart`, the router evaluates in this order:
+
+```
+1. bypass_hosts         → direct (no proxy)
+2. block_hosts          → refuse (403)
+3. direct_google_allow  → SNI rewrite (connect to google_ip)
+4. force_relay          → relay
+   (youtube_via_relay + direct_google_exclude + .google.com etc.)
+5. SNI_REWRITE_SUFFIXES → SNI rewrite
+6. Patterniha mappings  → SNI rewrite
+7. Google domain        → relay
+8. Default              → relay
+```
+
+No probing. No timeout. No guessing. Config decides everything.
 
 ### advanced
 
@@ -151,13 +174,9 @@ When enabled, lray automatically fetches the latest [MITM-DomainFronting](https:
 - Falls back to relay if direct fronting fails
 - Disable with `"patterniha_sync": false` in advanced config
 
-### Smart Router Cache
+### Smart Router
 
-The smart router persists learned routes to `routing_cache.json`:
-- Saves every 60 seconds and on shutdown
-- Loads on startup — no re-learning after restart
-- Entries expire after 24 hours
-- Max 5000 entries (keeps most recent)
+The smart router (`src/smart_router.py`) is purely rule-based. It returns one of three decisions: `direct`, `relay`, or `forwarder`. No probing, no caching, no learning — routing is deterministic based on config.
 
 ## LAN Sharing
 

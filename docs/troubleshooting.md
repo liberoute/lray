@@ -14,6 +14,8 @@
 | 429 from GAS | Quota exhausted | Add more scripts (`script_ids` array) |
 | Worker not responding | Worker crashed or rate limited | Check CF dashboard, redeploy |
 | SSH not connecting | Need ProxyCommand | See [SSH Tunnel](ssh-tunnel.md) |
+| SNI rewrite fails | Google IP throttled/blocked | Disable `patterniha_sync`, use relay mode |
+| Wrong mode for domain | Smart router config mismatch | Check `direct_google_allow` / `direct_google_exclude` in routing |
 
 ## Diagnostic Commands
 

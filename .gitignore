@@ -1,65 +1,38 @@
-# ignore secrets and user config
-.env
-config.json
-config.json.*
-ca/
+# Binary
+lray
+lray.exe
+lray-*
+*.exe~
 
-# Patterniha sync cache
+# Config (contains secrets)
+config.json
+config.json.bak
+config.json copy.bak
+config.test.json
+quota_state.json
 patterniha_config.json
 patterniha_state.json
 
-# Smart router cache
-routing_cache.json
+# CA private key
+ca/ca.key
 
-# AI context (internal, not for public)
-ai.md
-
-# Generated files (by setup wizard)
-dist/
-
-# ignore python venv
-.venv/
-venv/
-env/
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-dist/
-build/
-*.egg
-*.spec
+# Go
+vendor/
 
 # IDE
-.vscode/
 .idea/
-*.code-workspace
+.vscode/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Temp MITM certs
-domainfront_certs_*/
-
-# Deploy runtime data
-deploy/upstream_forwarder/.env
-deploy/upstream_forwarder/docker-compose.override.yml
-deploy/upstream_forwarder/data/
-deploy/upstream_forwarder/certs/
-deploy/self-hosted-exit/.env
-
-# Generated output
-output/
+# Old Python artifacts
+__pycache__/
+*.pyc
+*.pyo
 dist/
-release/
-
-# PyInstaller
 build/
-*.spec
+*.egg-info/

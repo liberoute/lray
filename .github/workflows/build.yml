@@ -4,88 +4,63 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
 
 jobs:
   build:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            arch: amd64
-            name: linux-amd64
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            name: linux-arm64
-          - os: windows-latest
-            arch: amd64
-            name: windows-amd64
-          - os: macos-latest
-            arch: arm64
-            name: macos-arm64
-          - os: macos-13
-            arch: amd64
-            name: macos-amd64
-
-    runs-on: ${{ matrix.os }}
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: '3.12'
+          go-version: '1.22'
 
-      - name: Install dependencies
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" \
+            -o "lray-${GOOS}-${GOARCH}${ext}" ./cmd/lray
 
-      - name: Get version
-        id: version
-        shell: python
-        run: |
-          import os, re
-          with open("src/constants.py") as f:
-              m = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
-          version = m.group(1) if m else "0.0.0"
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"version={version}\n")
-
-      - name: Build binary
-        run: |
-          pyinstaller --onefile --name lray-${{ matrix.name }} --paths src --hidden-import h2 --hidden-import hpack --hidden-import hyperframe --hidden-import brotli --hidden-import zstandard --hidden-import certifi cli.py
-
-      - name: Package (Linux/Mac)
-        if: runner.os != 'Windows'
-        run: |
-          cd dist
-          zip ../lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}.zip lray-${{ matrix.name }}
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cd dist
-          Compress-Archive -Path "lray-${{ matrix.name }}.exe" -DestinationPath "../lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}.zip"
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}
-          path: lray-${{ matrix.name }}-v${{ steps.version.outputs.version }}.zip
+          name: lray-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: lray-*
 
   release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: lray-*
           generate_release_notes: true

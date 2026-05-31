@@ -1,51 +1,66 @@
 {
   "mode": "apps_script",
+  "exit_mode": "cfw",
   "auth_key": "CHANGE_ME_TO_A_STRONG_SECRET",
   "script_id": "YOUR_APPS_SCRIPT_DEPLOYMENT_ID",
-
   "relay": {
     "google_ip": "216.239.38.120",
     "front_domain": "www.google.com",
     "timeout": 25,
-    "tls_connect_timeout": 15,
-    "tcp_connect_timeout": 10,
-    "parallel_relay": 1,
-    "verify_ssl": true
+    "parallel_relay": 1
   },
-
   "proxies": {
     "lan_sharing": false,
     "listeners": [
-      { "port": 8085, "type": "mixed", "mode": "smart" },
-      { "port": 1080, "type": "socks5", "mode": "smart" }
+      {
+        "port": 2801,
+        "type": "mixed",
+        "mode": "smart"
+      }
     ]
   },
-
   "dashboard": {
     "enabled": true,
-    "port": 8087,
-    "user": "",
-    "pass": ""
+    "port": 8087
   },
-
   "pac": {
     "enabled": true,
     "port": 8086
   },
-
   "routing": {
     "smart_routing": true,
-    "bypass_hosts": ["localhost", ".local", ".lan", ".home.arpa"],
+    "bypass_hosts": [
+      "localhost",
+      ".local",
+      ".lan",
+      ".home.arpa"
+    ],
     "block_hosts": [],
     "forwarder_hosts": [],
-    "youtube_via_relay": false
+    "youtube_via_relay": true,
+    "direct_google_exclude": [
+      "gemini.google.com",
+      "aistudio.google.com",
+      "notebooklm.google.com",
+      "meet.google.com",
+      "accounts.google.com",
+      "mail.google.com",
+      "drive.google.com",
+      "docs.google.com",
+      "chat.google.com",
+      "maps.google.com",
+      "play.google.com",
+      "translate.google.com"
+    ],
+    "direct_google_allow": [
+      "drive.usercontent.google.com"
+    ]
   },
-
   "advanced": {
     "doh_enabled": true,
     "hot_reload": true,
     "log_level": "INFO",
-    "patterniha_sync": true,
+    "patterniha_sync": false,
     "hosts": {}
   }
 }

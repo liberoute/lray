@@ -358,13 +358,13 @@ h1{font-size:1.3rem;margin-bottom:20px}
 </div>
 <div class="grid">
 <div class="card"><div class="label">Status</div><div class="value green">Active</div></div>
-<div class="card"><div class="label">Worker</div><div class="value blue" style="font-size:1rem">\${WORKER_URL}</div></div>
+<div class="card"><div class="label">Worker</div><div class="value blue" style="font-size:1rem">${WORKER_URL}</div></div>
 </div>
 <div class="card">
 <div class="label">Configuration</div>
 <div class="info">
-<p>Worker URL: \${WORKER_URL}</p>
-<p>Upstream Forwarder: \${typeof _FORWARDER_URL !== 'undefined' ? _FORWARDER_URL : 'not configured'}</p>
+<p>Worker URL: ${WORKER_URL}</p>
+<p>Upstream Forwarder: ${typeof _FORWARDER_URL !== 'undefined' ? _FORWARDER_URL : 'not configured'}</p>
 <p>Fail Mode: check env UPSTREAM_FAIL_MODE</p>
 </div>
 </div>

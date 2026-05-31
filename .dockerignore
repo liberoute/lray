@@ -1,0 +1,11 @@
+.git
+.github
+.vscode
+ca/ca.key
+config.json
+config.json.bak
+*.exe
+*.exe~
+release/
+docs/
+deploy/

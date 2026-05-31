@@ -1,30 +1,16 @@
-name: "lray"
+version: "3.8"
 
 services:
   lray:
     build: .
-    container_name: "lray"
+    container_name: lray
     restart: unless-stopped
-    env_file:
-      - .env
     ports:
-      - "${HTTP_PORT:-8085}:${HTTP_PORT:-8085}"
-      - "${SOCKS5_PORT:-1080}:${SOCKS5_PORT:-1080}"
-      - "${PAC_PORT:-8086}:${PAC_PORT:-8086}"
-      - "${DASHBOARD_PORT:-8087}:${DASHBOARD_PORT:-8087}"
+      - "2801:2801"
+      - "8086:8086"
+      - "8087:8087"
     volumes:
-      - "./config.json:/app/config.json:ro"
-      - "./ca:/app/ca"
+      - ./config.json:/app/config.json:ro
+      - ./ca:/app/ca
     environment:
-      DFT_CONFIG: /app/config.json
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', ${HTTP_PORT:-8085})); s.close()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
+      - LRAY_LOG_LEVEL=INFO

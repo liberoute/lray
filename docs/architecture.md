@@ -10,7 +10,7 @@
 │                    │                                                │
 │                    ├── PAC Server (:8086)                           │
 │                    ├── Dashboard (:8087)                            │
-│                    ├── Smart Router (auto direct/relay)             │
+│                    ├── Smart Router (rule-based direct/relay/SNI)   │
 │                    ├── Response Cache                               │
 │                    ├── DoH Resolver (fallback DNS)                  │
 │                    └── Config Watcher (hot-reload)                  │
@@ -62,7 +62,7 @@
 | `domain_fronter.py` | GAS relay engine (pool, batching, H2, SNI rotation) |
 | `h2_transport.py` | HTTP/2 multiplexing (100+ streams per connection) |
 | `mitm.py` | MITM certificate generation |
-| `smart_router.py` | Auto-learn which hosts need relay |
+| `smart_router.py` | Rule-based routing (direct/relay/forwarder) — no probing |
 | `doh_resolver.py` | DNS-over-HTTPS (Cloudflare, Google, Quad9) |
 | `pac_server.py` | PAC file for browser auto-config |
 | `dashboard_server.py` | Real-time monitoring UI |
@@ -90,7 +90,7 @@
 ```
 1. Browser requests https://example.com
 2. Proxy intercepts (MITM decrypts locally)
-3. Smart Router: "example.com blocked? → yes → relay"
+3. Smart Router: "example.com blocked? → check config rules → relay"
 4. Domain Fronter:
    a. Pick script ID (quota-aware round-robin)
    b. Encode request as JSON {u, m, h, b}

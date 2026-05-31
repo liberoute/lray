@@ -25,8 +25,10 @@ The wizard asks:
 1. **Auth key** — generates a random secret
 2. **VPS?** — if you have one, enter domain/IP
 3. **Exit mode** — how traffic exits (see [Exit Modes](exit-modes.md))
-4. **Proxy ports** — HTTP and SOCKS5
+4. **Proxy listeners** — port, type (mixed/http/socks5), and mode (smart/relay/direct/full/mitm)
 5. **TCP tunnels** — SSH, databases (optional)
+
+Default listener: port 2801, type `mixed`, mode `smart`.
 
 After setup, `output/` folder contains everything ready to deploy.
 
@@ -54,7 +56,7 @@ After setup, `output/` folder contains everything ready to deploy.
 
 ## Use
 
-Set browser proxy to `127.0.0.1:8085` or use PAC: `http://127.0.0.1:8086/proxy.pac`
+Set browser proxy to `127.0.0.1:2801` or use PAC: `http://127.0.0.1:8086/proxy.pac`
 
 ## Verify
 
