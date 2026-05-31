@@ -17,6 +17,9 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
+          - goos: linux
+            goarch: arm
+            goarm: 7
           - goos: windows
             goarch: amd64
           - goos: darwin
@@ -35,16 +38,19 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
         run: |
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          arch="${GOARCH}"
+          if [ "$GOARCH" = "arm" ] && [ -n "$GOARM" ]; then arch="arm${GOARM}"; fi
           CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" \
-            -o "lray-${GOOS}-${GOARCH}${ext}" ./cmd/lray
+            -o "lray-${GOOS}-${arch}${ext}" ./cmd/lray
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lray-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: lray-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm }}
           path: lray-*
 
   release:
