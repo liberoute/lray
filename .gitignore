@@ -25,9 +25,16 @@ vendor/
 *.swp
 *.swo
 
+# Kiro
+.kiro/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Wiki repo (cloned separately)
+wiki-repo/
+docs/
 
 # Old Python artifacts
 __pycache__/
